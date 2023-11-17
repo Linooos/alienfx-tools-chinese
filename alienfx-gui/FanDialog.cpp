@@ -41,7 +41,7 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         PowerReadACValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &acMode);
         PowerReadDCValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &dcMode);
 
-        vector<string> pModes{ "Off", "Enabled", "Aggressive", "Efficient", "Efficient aggressive" };
+        vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
         UpdateCombo(GetDlgItem(hDlg, IDC_AC_BOOST), pModes, acMode);
         UpdateCombo(GetDlgItem(hDlg, IDC_DC_BOOST), pModes, dcMode);;
 
@@ -103,7 +103,7 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         } break;
         case IDC_FAN_RESET:
         {
-            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "Do you want to clear all fan curves?", "Warning",
+            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "确定清除所有温度曲线？", "警告！！！",
                 MB_YESNO | MB_ICONWARNING) == IDYES) {
                 fan_conf->lastProf->fanControls[fan_conf->lastSelectedFan].clear();
                 ReloadTempView(tempList);
@@ -129,7 +129,7 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
     } break;
     case WM_APP + 2:
         EnableWindow(power_list, (bool)lParam);
-        SetWindowText(GetDlgItem(hDlg, IDC_BUT_OVER), (bool)lParam ? "Check\n Max. boost" : "Stop check");
+        SetWindowText(GetDlgItem(hDlg, IDC_BUT_OVER), (bool)lParam ? "检测\n 最大转速" : "停止检测");
         break;
     case WM_NOTIFY:
         switch (((NMHDR*)lParam)->idFrom) {

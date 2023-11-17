@@ -98,7 +98,7 @@ void OnLightSelChanged(HWND hwndDlg)
 	tabLightSel = TabCtrl_GetCurSel(hwndDlg);
 
 	if (!conf->afx_dev.activeLights) {
-		ShowNotification(&conf->niData, "No lights defined", "Assign some lights first!");
+		ShowNotification(&conf->niData, "没有发现定义的灯光配置", "请先绑定灯光布局！");
 		tabLightSel = TAB_DEVICES;
 		TabCtrl_SetCurSel(hwndDlg, tabLightSel);
 	}
@@ -149,7 +149,7 @@ BOOL CALLBACK TabLightsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 	{
 		//firstInit = true;
 		CreateTabControl(tab_list,
-			{"Colors", "Events Monitoring", "Ambient", "Haptics", "Grid Effect", "Devices and Grids"},
+			{"颜色", "事件监视器", "屏幕映射", "音频映射", "布局灯光特效", "灯光硬件及预设"},
 			{ IDD_DIALOG_COLORS, IDD_DIALOG_EVENTS, IDD_DIALOG_AMBIENT, IDD_DIALOG_HAPTICS, IDD_DIALOG_GRIDEFFECT, IDD_DIALOG_DEVICES},
 			{ (DLGPROC)TabColorDialog, (DLGPROC)TabEventsDialog, (DLGPROC)TabAmbientDialog, (DLGPROC)TabHapticsDialog,
 			(DLGPROC)TabGridDialog, (DLGPROC)TabDevicesDialog } );

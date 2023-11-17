@@ -109,8 +109,8 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 	{
 	case WM_INITDIALOG:
 	{
-		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_TRIGGER), { "Off", "Continues", "Keyboard", "Event", "Ambient" });
-		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GEFFTYPE), { "Running light", "Wave", "Gradient", "Fill", "Star field", "Fade"});
+		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_TRIGGER), { "关闭", "连续", "键盘", "事件", "屏幕映射" });
+		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GEFFTYPE), { "走马灯", "浪涌", "渐变", "充斥", "星空", "消逝"});
 		SendMessage(speed_slider, TBM_SETRANGE, true, MAKELPARAM(-80, 80));
 		SendMessage(width_slider, TBM_SETRANGE, true, MAKELPARAM(1, 80));
 		SendMessage(gs_slider, TBM_SETRANGE, true, MAKELPARAM(5, 1000));

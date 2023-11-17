@@ -151,11 +151,11 @@ DWORD WINAPI CUpdateCheck(LPVOID lparam) {
 						res += ".0";
 					if (res.compare(GetAppVersion()) > 0) {
 						// new version detected!
-						ShowNotification(niData, "Update available!", "Latest version is " + res);
+						ShowNotification(niData, "更新可获取", "更新版本：" + res+"(ps:汉化作者是懒批，这个更新是非汉化原版的）");
 						isNewVersion = true;
 					} else
 						if (needUpdateFeedback)
-							ShowNotification(niData, "You are up to date!", "You are using latest version.");
+							ShowNotification(niData, "已是最新", "你正在使用最新的版本");
 				}
 			}
 			InternetCloseHandle(req);
@@ -163,7 +163,7 @@ DWORD WINAPI CUpdateCheck(LPVOID lparam) {
 		InternetCloseHandle(session);
 	}
 	if (needUpdateFeedback && !req)
-			ShowNotification(niData, "Update check failed!", "Can't connect to GitHub for update check.");
+			ShowNotification(niData, "更新错误", "无法链接到GitHub");
 	delete[] buf;
 	return 0;
 }

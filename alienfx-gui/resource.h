@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
-// Used by alienfx-gui.rc
+// Microsoft Visual C++ 生成的包含文件。
+// 供 alienfx-gui.rc 使用
 //
 #define IDD_ABOUTBOX                    103
 #define IDM_ABOUT                       104

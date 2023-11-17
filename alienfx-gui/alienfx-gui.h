@@ -5,6 +5,7 @@
 #include <windowsx.h>
 #include "resource.h"
 #include "ConfigHandler.h"
+#include "locale.h"
 
 // debug print
 #ifdef _DEBUG

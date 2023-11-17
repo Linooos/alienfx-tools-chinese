@@ -102,8 +102,8 @@ BOOL CALLBACK WhiteBalanceDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 void SetLightInfo() {
 	fxhl->TestLight(activeDevice, eLid);
 	keySetLight = conf->afx_dev.GetMappingByDev(activeDevice, eLid);
-	SetDlgItemText(dDlg, IDC_EDIT_NAME, keySetLight ? keySetLight->name.c_str() : "<unused>");
-	SetDlgItemText(dDlg, IDC_STATIC_SCANCODE, keySetLight && keySetLight->scancode ? GetKeyName((WORD)keySetLight->scancode).c_str() : "Off");
+	SetDlgItemText(dDlg, IDC_EDIT_NAME, keySetLight ? keySetLight->name.c_str() : "<未使用>");
+	SetDlgItemText(dDlg, IDC_STATIC_SCANCODE, keySetLight && keySetLight->scancode ? GetKeyName((WORD)keySetLight->scancode).c_str() : "关闭");
 	SetDlgItemInt(dDlg, IDC_LIGHTID, eLid, false);
 	CheckDlgButton(dDlg, IDC_ISPOWERBUTTON, keySetLight && keySetLight->flags & ALIENFX_FLAG_POWER);
 	CheckDlgButton(dDlg, IDC_CHECK_INDICATOR, keySetLight && keySetLight->flags & ALIENFX_FLAG_INDICATOR);
@@ -435,7 +435,7 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			break;
 		case IDC_BUT_CLEAR:
 			if (keySetLight) {
-				if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "Do you want to remove light?", "Warning",
+				if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "确定重置灯光？", "警告!!!",
 					MB_YESNO | MB_ICONWARNING) == IDYES) {
 					if (keySetLight->flags & ALIENFX_FLAG_POWER) {
 						fxhl->ResetPower(activeDevice);
