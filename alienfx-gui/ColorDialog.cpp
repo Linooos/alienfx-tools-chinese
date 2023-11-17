@@ -15,7 +15,7 @@ extern void RedrawZoneGrid(DWORD grpid, bool rec);
 
 int effID = 0;
 
-const static vector<string> lightEffectNames{ "Color", "Pulse", "Morph", "Breath", "Spectrum", "Rainbow"/*, "Power"*/ };
+const static vector<string> lightEffectNames{ "ÑÕÉ«", "Âö³å", "¹ý¶É", "ºôÎü", "²¨Æ×", "²Êºç"/*, "Power"*/ };
 
 void SetEffectData(HWND hDlg) {
 	bool hasEffects = mmap && mmap->color.size();

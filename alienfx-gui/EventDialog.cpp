@@ -18,8 +18,8 @@ event* ev = NULL;
 
 const static vector<string> eventTypeNames{ "Performance", "Indicator" };
 const static vector<vector<string>> eventNames{
-		{ "CPU load", "RAM load", "Storage load", "GPU load", "Network", "Temperature", "Battery level",
-			"Fans RPM", "Power usage", "Power mode"},
+		{ "CPU负载", "内存负载", "硬盘负载", "显卡负载", "网络", "温度", "电池",
+			"风扇转速", "功耗", "电源模式"},
 		{ "Storage activity", "Network activity", "System overheat", "Out of memory", "Low battery", "Selected language",
 			"BIOS Power mode", "Power source" }};
 

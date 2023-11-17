@@ -136,8 +136,28 @@ void ConfigFan::Save() {
 
 string ConfigFan::GetPowerName(int index) {
 	auto pwr = &powers[index];
-	if (pwr->empty())
+	if (pwr->empty()) {
+		switch (index) {
+		case 160:
+			*pwr = string("均衡模式");
+			break;
+		case 161:
+			*pwr = string("性能模式");
+			break;
+		case 162:
+			*pwr = string("电池模式");
+			break;
+		case 163:
+			*pwr = string("安静模式");
+			break;
+		case 164:
+			*pwr = string("芜湖模式");
+		break;
+    	default:
+			
 		*pwr = "Level " + to_string(index);
+	}
+	}
 	return *pwr;
 }
 

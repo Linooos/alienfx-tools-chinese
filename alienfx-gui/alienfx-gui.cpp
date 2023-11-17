@@ -125,6 +125,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_ LPWSTR    lpCmdLine,
 	_In_ int       nCmdShow)
 {
+	
 	UNREFERENCED_PARAMETER(hPrevInstance);
 
 	hInst = hInstance;
@@ -133,7 +134,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	conf = new ConfigHandler();
 	conf->Load();
-
+	setlocale(LC_CTYPE, "chs");
 	auto grids = conf->afx_dev.GetGrids();
 	if (grids->empty()) {
 		grids->push_back({ 0, 20, 8, "Main" });
@@ -382,7 +383,7 @@ void CreateTabControl(HWND parent, vector<string> names, vector<DWORD> resID, ve
 
 void SetMainTabs() {
 	CreateTabControl(GetDlgItem(mDlg, IDC_TAB_MAIN),
-		{ "Lights", "Fans and Power", "Profiles", "Settings" },
+		{ "灯光", "风扇和性能", "预设", "设置" },
 		{ IDD_DIALOG_LIGHTS, IDD_DIALOG_FAN, IDD_DIALOG_PROFILES, IDD_DIALOG_SETTINGS },
 		{ (DLGPROC)TabLightsDialog, (DLGPROC)TabFanDialog, (DLGPROC)TabProfilesDialog, (DLGPROC)TabSettingsDialog }
 	);
@@ -451,7 +452,7 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			conf->afx_dev.SaveMappings();
 			conf->Save();
 			fxhl->Refresh(true);
-			ShowNotification(&conf->niData, "Configuration saved!", "Configuration saved successfully.");
+			ShowNotification(&conf->niData, "保存成功", "配置存储完成");
 			break;
 		case IDC_PROFILE_EFFECTS:
 			conf->activeProfile->effmode = (IsDlgButtonChecked(hDlg, LOWORD(wParam)) == BST_CHECKED);
