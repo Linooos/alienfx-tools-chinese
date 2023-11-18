@@ -169,7 +169,7 @@ BOOL CALLBACK ZoneSelectionDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 	case WM_INITDIALOG:
 	{
 		zsDlg = hDlg;
-		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GAUGE), { "Off", "Horizontal", "Vertical", "Diagonal (left)", "Diagonal (right)", "Radial" });
+		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GAUGE), { "¹Ø±Õ", "Ë®Æ½", "´¹Ö±", "±ß½Ç (×ó)", "±ß½Ç (ÓÒ)", "·øÉä" });
 		if (conf->activeProfile->lightsets.size() && !mmap)
 			eItem = conf->activeProfile->lightsets.front().group;
 		mmap = conf->FindMapping(eItem);
