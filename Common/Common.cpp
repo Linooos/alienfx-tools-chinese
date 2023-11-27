@@ -151,7 +151,7 @@ DWORD WINAPI CUpdateCheck(LPVOID lparam) {
 						res += ".0";
 					if (res.compare(GetAppVersion()) > 0) {
 						// new version detected!
-						ShowNotification(niData, "更新可获取", "更新版本：" + res+"(ps:汉化作者是懒批，这个更新是非汉化原版的）");
+						ShowNotification(niData, "原版更新可获取", "更新版本：" + res);
 						isNewVersion = true;
 					} else
 						if (needUpdateFeedback)
