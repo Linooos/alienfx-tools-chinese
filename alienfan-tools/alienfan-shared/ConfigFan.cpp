@@ -1,5 +1,7 @@
 #include "ConfigFan.h"
 #include "RegHelperLib.h"
+#include <codecvt>
+#include <locale>
 
 ConfigFan::ConfigFan()
 {
@@ -150,151 +152,152 @@ string *ConfigFan::GetPowerName(int index)
 	string *pwr = &powers[index];
 	if (pwr->empty())
 	{
-		switch (index)
-		{
+		switch (index) {
 		case 160:
-			*pwr = string("均衡模式");
+			*pwr = string("balance");
 			break;
 		case 161:
-			*pwr = string("性能模式");
+			*pwr = string("performance");
 			break;
 		case 162:
-			*pwr = string("电池模式");
+			*pwr = string("bettery");
 			break;
 		case 163:
-			*pwr = string("安静模式");
+			*pwr = string("quiet");
 			break;
 		case 164:
-			*pwr = string("满速模式");
+			*pwr = string("extra");
 			break;
 		default:
-			*pwr = "Level " + to_string(index);
+			*pwr = "Level " + std::to_string(index);
 		}
-		return pwr;
+		
 	}
+	return pwr;
+}
 
-	void ConfigFan::UpdateBoost(byte fanID, byte boost, WORD rpm)
+void ConfigFan::UpdateBoost(byte fanID, byte boost, WORD rpm)
+{
+	boosts[fanID] = {(byte)boost, max(rpm, boosts[fanID].maxRPM)};
+	Save();
+}
+
+int ConfigFan::GetFanScale(byte fanID)
+{
+	return max(boosts[fanID].maxBoost, 100);
+}
+
+string ConfigFan::GetSensorName(AlienFan_SDK::ALIENFAN_SEN_INFO *acpi)
+{
+	auto sen = &sensors[acpi->sid];
+	if (sen->empty())
+		*sen = acpi->name;
+	return *sen;
+}
+
+string GetTag(string xml, string tag, size_t &pos)
+{
+	size_t firstpos = xml.find("<" + tag + ">", pos);
+	if (firstpos != string::npos)
 	{
-		boosts[fanID] = {(byte)boost, max(rpm, boosts[fanID].maxRPM)};
-		Save();
+		firstpos += tag.length() + 2;
+		pos = xml.find("</" + tag + ">", firstpos);
+		return xml.substr(firstpos, pos - firstpos);
 	}
-
-	int ConfigFan::GetFanScale(byte fanID)
+	else
 	{
-		return max(boosts[fanID].maxBoost, 100);
+		pos = string::npos;
+		return "";
 	}
+}
 
-	string ConfigFan::GetSensorName(AlienFan_SDK::ALIENFAN_SEN_INFO * acpi)
+string ReadFromESIF(string command, HANDLE g_hChildStd_IN_Wr, HANDLE g_hChildStd_OUT_Rd, PROCESS_INFORMATION *proc)
+{
+	DWORD written;
+	string outpart;
+	WriteFile(g_hChildStd_IN_Wr, command.c_str(), (DWORD)command.length(), &written, NULL);
+	while (outpart.find("Returned:") == string::npos)
 	{
-		auto sen = &sensors[acpi->sid];
-		if (sen->empty())
-			*sen = acpi->name;
-		return *sen;
-	}
-
-	string GetTag(string xml, string tag, size_t & pos)
-	{
-		size_t firstpos = xml.find("<" + tag + ">", pos);
-		if (firstpos != string::npos)
+		while (PeekNamedPipe(g_hChildStd_OUT_Rd, NULL, 0, NULL, &written, NULL) && written)
 		{
-			firstpos += tag.length() + 2;
-			pos = xml.find("</" + tag + ">", firstpos);
-			return xml.substr(firstpos, pos - firstpos);
+			char *buffer = new char[written + 1]{0};
+			ReadFile(g_hChildStd_OUT_Rd, buffer, written, &written, NULL);
+			outpart += buffer;
+			delete[] buffer;
 		}
-		else
-		{
-			pos = string::npos;
-			return "";
-		}
 	}
-
-	string ReadFromESIF(string command, HANDLE g_hChildStd_IN_Wr, HANDLE g_hChildStd_OUT_Rd, PROCESS_INFORMATION * proc)
+	if (outpart.find("</result>") != string::npos)
 	{
-		DWORD written;
-		string outpart;
-		WriteFile(g_hChildStd_IN_Wr, command.c_str(), (DWORD)command.length(), &written, NULL);
-		while (outpart.find("Returned:") == string::npos)
+		size_t pos = 0;
+		return GetTag(outpart, "result", pos);
+	}
+	else
+		return "";
+}
+
+DWORD WINAPI DPTFInit(LPVOID lparam)
+{
+	ConfigFan *conf = (ConfigFan *)lparam;
+	string wdName;
+	SECURITY_ATTRIBUTES attr{sizeof(SECURITY_ATTRIBUTES), NULL, true};
+	STARTUPINFO sinfo{sizeof(STARTUPINFO), 0};
+	HANDLE g_hChildStd_IN_Wr, g_hChildStd_OUT_Rd, initHandle = NULL;
+	PROCESS_INFORMATION proc;
+	wdName.resize(2048);
+	wdName.resize(GetWindowsDirectory((LPSTR)wdName.data(), 2047));
+	wdName += "\\system32\\DriverStore\\FileRepository\\";
+	WIN32_FIND_DATA file;
+	HANDLE search_handle = FindFirstFile((wdName + "dptf_cpu*").c_str(), &file);
+	if (conf->needDPTF = (search_handle != INVALID_HANDLE_VALUE))
+	{
+		wdName += string(file.cFileName) + "\\esif_uf.exe";
+		FindClose(search_handle);
+		CreatePipe(&g_hChildStd_OUT_Rd, &sinfo.hStdOutput, &attr, 0);
+		CreatePipe(&sinfo.hStdInput, &g_hChildStd_IN_Wr, &attr, 0);
+		DWORD flags = PIPE_NOWAIT;
+		SetNamedPipeHandleState(g_hChildStd_IN_Wr, &flags, NULL, NULL);
+		sinfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+		sinfo.wShowWindow = SW_HIDE;
+		sinfo.hStdError = sinfo.hStdOutput;
+		HWND cur = GetForegroundWindow();
+		if (conf->needDPTF = CreateProcess(NULL, (LPSTR)(wdName + " client").c_str(), NULL, NULL, true,
+										   CREATE_NEW_CONSOLE, NULL, NULL, &sinfo, &proc))
 		{
-			while (PeekNamedPipe(g_hChildStd_OUT_Rd, NULL, 0, NULL, &written, NULL) && written)
+			SetForegroundWindow(cur);
+			// Start init...
+			string parts = ReadFromESIF("format xml\nparticipants\nexit\n", g_hChildStd_IN_Wr, g_hChildStd_OUT_Rd, &proc);
+			if (parts.size())
 			{
-				char *buffer = new char[written + 1]{0};
-				ReadFile(g_hChildStd_OUT_Rd, buffer, written, &written, NULL);
-				outpart += buffer;
-				delete[] buffer;
-			}
-		}
-		if (outpart.find("</result>") != string::npos)
-		{
-			size_t pos = 0;
-			return GetTag(outpart, "result", pos);
-		}
-		else
-			return "";
-	}
-
-	DWORD WINAPI DPTFInit(LPVOID lparam)
-	{
-		ConfigFan *conf = (ConfigFan *)lparam;
-		string wdName;
-		SECURITY_ATTRIBUTES attr{sizeof(SECURITY_ATTRIBUTES), NULL, true};
-		STARTUPINFO sinfo{sizeof(STARTUPINFO), 0};
-		HANDLE g_hChildStd_IN_Wr, g_hChildStd_OUT_Rd, initHandle = NULL;
-		PROCESS_INFORMATION proc;
-		wdName.resize(2048);
-		wdName.resize(GetWindowsDirectory((LPSTR)wdName.data(), 2047));
-		wdName += "\\system32\\DriverStore\\FileRepository\\";
-		WIN32_FIND_DATA file;
-		HANDLE search_handle = FindFirstFile((wdName + "dptf_cpu*").c_str(), &file);
-		if (conf->needDPTF = (search_handle != INVALID_HANDLE_VALUE))
-		{
-			wdName += string(file.cFileName) + "\\esif_uf.exe";
-			FindClose(search_handle);
-			CreatePipe(&g_hChildStd_OUT_Rd, &sinfo.hStdOutput, &attr, 0);
-			CreatePipe(&sinfo.hStdInput, &g_hChildStd_IN_Wr, &attr, 0);
-			DWORD flags = PIPE_NOWAIT;
-			SetNamedPipeHandleState(g_hChildStd_IN_Wr, &flags, NULL, NULL);
-			sinfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-			sinfo.wShowWindow = SW_HIDE;
-			sinfo.hStdError = sinfo.hStdOutput;
-			HWND cur = GetForegroundWindow();
-			if (conf->needDPTF = CreateProcess(NULL, (LPSTR)(wdName + " client").c_str(), NULL, NULL, true,
-											   CREATE_NEW_CONSOLE, NULL, NULL, &sinfo, &proc))
-			{
-				SetForegroundWindow(cur);
-				// Start init...
-				string parts = ReadFromESIF("format xml\nparticipants\nexit\n", g_hChildStd_IN_Wr, g_hChildStd_OUT_Rd, &proc);
-				if (parts.size())
+				conf->needDPTF = 0;
+				size_t pos = 0;
+				WORD sid = 0;
+				while (pos != string::npos)
 				{
-					conf->needDPTF = 0;
-					size_t pos = 0;
-					WORD sid = 0;
-					while (pos != string::npos)
+					string part = GetTag(parts, "participant", pos);
+					size_t descpos = 0;
+					byte sID = atoi(GetTag(part, "UpId", descpos).c_str());
+					string name = GetTag(part, "desc", descpos);
+					int dcount = atoi(GetTag(part, "domainCount", descpos).c_str());
+					// check domains...
+					for (int i = 0; i < dcount; i++)
 					{
-						string part = GetTag(parts, "participant", pos);
-						size_t descpos = 0;
-						byte sID = atoi(GetTag(part, "UpId", descpos).c_str());
-						string name = GetTag(part, "desc", descpos);
-						int dcount = atoi(GetTag(part, "domainCount", descpos).c_str());
-						// check domains...
-						for (int i = 0; i < dcount; i++)
+						size_t dPos = 0;
+						string domain = GetTag(part, "domain", descpos);
+						string dName = GetTag(domain, "name", dPos);
+						if (strtol(GetTag(domain, "capability", dPos).c_str(), NULL, 16) & 0x80)
 						{
-							size_t dPos = 0;
-							string domain = GetTag(part, "domain", descpos);
-							string dName = GetTag(domain, "name", dPos);
-							if (strtol(GetTag(domain, "capability", dPos).c_str(), NULL, 16) & 0x80)
-							{
-								conf->sensors[sid++] = name + (dcount > 1 ? " (" + dName + ")" : "");
-							}
+							conf->sensors[sid++] = name + (dcount > 1 ? " (" + dName + ")" : "");
 						}
 					}
 				}
-				CloseHandle(proc.hProcess);
-				CloseHandle(proc.hThread);
 			}
-			CloseHandle(sinfo.hStdInput);
-			CloseHandle(g_hChildStd_IN_Wr);
-			CloseHandle(g_hChildStd_OUT_Rd);
-			CloseHandle(sinfo.hStdOutput);
+			CloseHandle(proc.hProcess);
+			CloseHandle(proc.hThread);
 		}
-		return 0;
+		CloseHandle(sinfo.hStdInput);
+		CloseHandle(g_hChildStd_IN_Wr);
+		CloseHandle(g_hChildStd_OUT_Rd);
+		CloseHandle(sinfo.hStdOutput);
 	}
+	return 0;
+}
