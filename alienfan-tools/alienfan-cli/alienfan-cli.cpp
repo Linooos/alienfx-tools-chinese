@@ -100,6 +100,7 @@ void CheckFanOverboost(byte num, byte boost) {
     printf("Final boost - %d, %d RPM\n\n", bestBoostPoint.maxBoost, bestBoostPoint.maxRPM);
     acpi.SetFanBoost(num, oldBoost);
     fan_conf.UpdateBoost(num, bestBoostPoint.maxBoost, bestBoostPoint.maxRPM);
+    fan_conf.Save();
 }
 
 void PrintFanType(int index, int val, const char* type) {
@@ -128,6 +129,10 @@ setfans=<fan1>[,<fanN>][,mode]\tSet fans boost level (0..100 - in percent) with 
 setover[=fanID[,boost]]\t\tSet overboost for selected fan to boost (manual or auto)\n\
 setgmode=<mode>\t\t\tSet G-mode on/off (1-on, 0-off)\n\
 gmode\t\t\t\tShow G-mode state\n\
+gettcc\t\t\t\tShow current TCC level\n\
+settcc=<level>\t\t\t\tSet TCC level\n\
+getxmp\t\t\t\tShow current memory XMP profile level\n\
+setxmp=<level>\t\t\t\tSet memory XMP profile level\n\
 setcolor=id,r,g,b\t\tSet light to color\n\
 setbrightness=<brightness>\tSet lights brightness\n\
 \tPower mode can be in 0..N - according to power states detected\n\
@@ -139,16 +144,24 @@ setbrightness=<brightness>\tSet lights brightness\n\
 
 int main(int argc, char* argv[])
 {
-    printf("AlienFan-CLI v8.5.1\n");
-
+    printf("AlienFan-CLI v9.0.0.0\n");
+#ifndef NOLIGHTS
     AlienFan_SDK::Lights* lights = NULL;
-
+#endif
     if (acpi.Probe()) {
+#ifndef NOLIGHTS
         lights = new AlienFan_SDK::Lights(&acpi);
-        printf("Supported hardware (%d) detected, %d fans, %d sensors, %d power states%s%s.\n",
+#endif
+        printf("Supported hardware (%d) detected, %d fans, %d sensors, %d power states%s%s%s%s.\n",
             acpi.GetSystemID(), (int)acpi.fans.size(), (int)acpi.sensors.size(), (int)acpi.powers.size(),
             (acpi.isGmode ? ", G-Mode" : ""),
-            (lights->isActivated ? ", Lights" : ""));
+            (acpi.isTcc ? ", TCC" : ""),
+            (acpi.isXMP ? ", XMP" : ""),
+            (
+#ifndef NOLIGHTS
+                lights->isActivated ? ", Lights" :
+#endif
+                ""));
     }
     else {
         if (acpi.isAlienware)
@@ -196,15 +209,15 @@ int main(int argc, char* argv[])
             continue;
         }
         if (command == "unlock") {
-            printf("%s", acpi.Unlock() < 0 ? "Unlock failed!\n" : "Unlocked.\n");
+            printf("%s", acpi.SetPower(0) < 0 ? "Unlock failed!\n" : "Unlocked.\n");
             continue;
         }
-        if (command == "gmode" /*&& acpi.isGmode*/) {
+        if (command == "gmode") {
             printf("G-mode is %s\n", acpi.GetGMode() ? "On" : "Off");
             continue;
         }
         if (command == "setpower" && CheckArgs(1, acpi.powers.size()) && acpi.SetPower(acpi.powers[args[0].num]) >= 0) {
-            printf("Power mode set to %s (%d)\n", fan_conf.GetPowerName(args[0].num).c_str(), acpi.powers[args[0].num]);
+            printf("Power mode set to %s (%x)\n", fan_conf.GetPowerName(acpi.powers[args[0].num])->c_str(), acpi.powers[args[0].num]);
             continue;
         }
         if (command == "setperf" && CheckArgs(2, 5)) {
@@ -219,9 +232,9 @@ int main(int argc, char* argv[])
             continue;
         }
         if (command == "getpower") {
-            int res = acpi.GetPower();
+            int res = acpi.GetPower(true);
             if (res >= 0)
-                printf("Power mode: %s (%d)\n", fan_conf.GetPowerName(res).c_str(), acpi.powers[res]);
+                printf("Power mode: %s (%x)\n", fan_conf.GetPowerName(res)->c_str(), res);
             continue;
         }
         if (command == "getfans") {
@@ -262,6 +275,7 @@ int main(int argc, char* argv[])
             }
             continue;
         }
+#ifndef NOLIGHTS
         if (command == "setcolor" && lights->isActivated && CheckArgs(4, 255)) { // Set light color for Aurora
             printf("SetColor result %d.\n", lights->SetColor(args[0].num, args[1].num, args[2].num, args[3].num));
             continue;
@@ -270,8 +284,33 @@ int main(int argc, char* argv[])
             printf("SetBrightness result %d.\n", lights->SetBrightness(args[0].num));
             continue;
         }
-
+#endif
 #ifndef ALIENFAN_SDK_V1
+        if (command == "gettcc") {
+            printf("Current TCC is %d (max %d)\n", acpi.GetTCC(), acpi.maxTCC);
+            continue;
+        }
+        if (command == "settcc" && CheckArgs(1, 255)) {
+            if (args[0].num <= acpi.maxTCC && acpi.maxTCC - args[0].num <= acpi.maxOffset) {
+                acpi.SetTCC(args[0].num);
+                printf("Current TCC set to %d\n", args[0].num);
+            }
+            else
+                printf("Incorrect TCC value - should be in [%d..%d]\n", acpi.maxTCC - acpi.maxOffset, acpi.maxTCC);
+
+            continue;
+        }
+        if (command == "getxmp") {
+            printf("Current XMP profile is %d\n", acpi.GetXMP());
+            continue;
+        }
+        if (command == "setxmp" && CheckArgs(1, 3)) {
+            if (!acpi.SetXMP(args[0].num))
+                printf("XMP profile set to %d\n", args[0].num);
+            else
+                printf("XMP switch locked");
+            continue;
+        }
         if (command == "dump" && acpi.isAlienware) { // dump WMI functions
             BSTR name;
             // Command dump
@@ -279,43 +318,52 @@ int main(int argc, char* argv[])
             wprintf(L"Names:\n%s\n", name);
             continue;
         }
-        //if (command == "probe" && acpi.isAlienware && CheckArgs(2, 255)) { // manual detection dump
-        //    VARIANT result{ VT_I4 };
-        //    result.intVal = -1;
-        //    IWbemClassObject* m_outParameters = NULL;
-        //    VARIANT parameters = { VT_I4 };
-        //    parameters.uintVal = AlienFan_SDK::ALIENFAN_INTERFACE{ (byte)args[0].num, (byte)args[1].num, 0, 0 }.args;
-        //    acpi.m_InParamaters->Put((BSTR)L"arg2", NULL, &parameters, 0);
-        //    if (acpi.m_WbemServices->ExecMethod(acpi.m_instancePath.bstrVal,
-        //        AlienFan_SDK::commandList[0], 0, NULL, acpi.m_InParamaters, &m_outParameters, NULL) == S_OK && m_outParameters) {
-        //        m_outParameters->Get(L"argr", 0, &result, nullptr, nullptr);
-        //        m_outParameters->Release();
-        //    }
-        //    printf("Subcommand %d, arg %d - result %x\n", args[0].num, args[1].num, result.intVal);
-        //    continue;
-        //}
-#else
-        if (command == "getcharge" && acpi.isCharge) { // dump WMI functions
-            printf("Charge is %s\n", acpi.GetCharge() & 0x10 ? "Off" : "On");
+        if (command == "probe" && acpi.isAlienware && CheckArgs(1, 2)) { // manual detection dump
+            VARIANT result{ VT_I4 };
+            result.intVal = -1;
+            IWbemClassObject* m_outParameters = NULL;
+            VARIANT parameters = { VT_I4 };
+            parameters.uintVal = AlienFan_SDK::ALIENFAN_INTERFACE{ (byte)args[0].num, 0, 0, 0 }.args;
+            acpi.m_InParamaters->Put((BSTR)L"arg2", NULL, &parameters, 0);
+            if (acpi.m_WbemServices->ExecMethod(acpi.m_instancePath.bstrVal,
+                (BSTR)L"Set_OCUIBIOSControl", 0, NULL, acpi.m_InParamaters, &m_outParameters, NULL) == S_OK && m_outParameters) {
+                m_outParameters->Get(L"argr", 0, &result, nullptr, nullptr);
+                m_outParameters->Release();
+            }
+            printf("Subcommand %d - result %x\n", args[0].num, result.intVal);
             continue;
         }
-        if (command == "setcharge" && acpi.isCharge && CheckArgs(1, 255)) { // dump WMI functions
-            printf("Charge set to %d\n", acpi.SetCharge(args[0].num ? 0 : 0x10));
+        if (command == "test") { // Test
+            IWbemClassObject* m_outParameters = NULL;
+            VARIANT result{ VT_I4 };
+            result.intVal = -1;
+            if (acpi.m_WbemServices->ExecMethod(acpi.m_instancePath.bstrVal,
+                (BSTR)L"Return_OverclockingReport", 0, NULL, NULL, &m_outParameters, NULL) == S_OK && m_outParameters) {
+                m_outParameters->Get(L"argr", 0, &result, nullptr, nullptr);
+                m_outParameters->Release();
+            }
+            printf("Subcommand %d - result %x\n", 0, result.intVal);
             continue;
         }
-#endif // !ALIENFAN_SDK_V1
-
-        //if (command == "test") { // Test
-        //    continue;
-        //}
         printf("Unknown command - %s, run without parameters for help.\n", command.c_str());
+#else
+        //if (command == "getcharge" && acpi.isCharge) { // dump WMI functions
+        //    printf("Charge is %s\n", acpi.GetCharge() & 0x10 ? "Off" : "On");
+        //    continue;
+        //}
+        //if (command == "setcharge" && acpi.isCharge && CheckArgs(1, 255)) { // dump WMI functions
+        //    printf("Charge set to %d\n", acpi.SetCharge(args[0].num ? 0 : 0x10));
+        //    continue;
+        //}
+#endif // !ALIENFAN_SDK_V1
     }
 
     if (argc < 2)
     {
         Usage();
     }
-
+#ifndef NOLIGHTS
     if (lights)
         delete lights;
+#endif
 }

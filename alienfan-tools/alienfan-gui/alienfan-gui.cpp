@@ -1,5 +1,5 @@
 #include <windowsx.h>
-#include <wtypes.h>
+#include <windows.h>
 #include <powrprof.h>
 #include "Resource.h"
 #include "ConfigFan.h"
@@ -15,6 +15,7 @@ using namespace std;
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
+HWND sTip1 = 0, sTip2 = 0;
 
 ConfigFan* fan_conf = NULL;                     // Config...
 MonHelper* mon = NULL;                          // Monitoring object
@@ -120,7 +121,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 }
 
 void RestoreApp() {
-    SetTimer(mDlg, 0, 500, NULL);
+    SetTimer(mDlg, 0, fan_conf->pollingRate, NULL);
     ShowWindow(mDlg, SW_RESTORE);
     ShowWindow(fanWindow, SW_RESTORE);
     SendMessage(fanWindow, WM_PAINT, 0, 0);
@@ -135,6 +136,8 @@ void ToggleValue(DWORD& value, int cID) {
 LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     HWND power_list = GetDlgItem(hDlg, IDC_COMBO_POWER),
+        tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC),
+        xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP),
         tempList = GetDlgItem(hDlg, IDC_TEMP_LIST),
         fanList = GetDlgItem(hDlg, IDC_FAN_LIST);
 
@@ -173,7 +176,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         ReloadPowerList(power_list);
         ReloadFanView(fanList);
 
-        SetTimer(hDlg, 0, 500, NULL);
+        SetTimer(hDlg, 0, fan_conf->pollingRate, NULL);
 
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_STARTWITHWINDOWS, fan_conf->startWithWindows ? MF_CHECKED : MF_UNCHECKED);
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_STARTMINIMIZED, fan_conf->startMinimized ? MF_CHECKED : MF_UNCHECKED);
@@ -182,6 +185,25 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_KEYBOARDSHORTCUTS, fan_conf->keyShortcuts ? MF_CHECKED : MF_UNCHECKED);
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_RESTOREPOWERMODE, fan_conf->keepSystem ? MF_CHECKED : MF_UNCHECKED);
         SetDlgItemInt(hDlg, IDC_EDIT_POLLING, fan_conf->pollingRate, false);
+
+        // Set SystemID
+        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string(mon->systemID)).c_str());
+
+        // OC block
+        EnableWindow(tcc_slider, mon->acpi->isTcc);
+        if (mon->acpi->isTcc) {
+            SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
+            sTip1 = CreateToolTip(tcc_slider, sTip1);
+            SetSlider(sTip1, fan_conf->lastProf->currentTCC);
+            SendMessage(tcc_slider, TBM_SETPOS, true, fan_conf->lastProf->currentTCC);
+        }
+        EnableWindow(xmp_slider, mon->acpi->isXMP);
+        if (mon->acpi->isXMP) {
+            SendMessage(xmp_slider, TBM_SETRANGE, true, MAKELPARAM(0, 2));
+            sTip2 = CreateToolTip(xmp_slider, sTip2);
+            SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
+            SendMessage(xmp_slider, TBM_SETPOS, true, fan_conf->lastProf->memoryXMP);
+        }
 
         return true;
     } break;
@@ -336,7 +358,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             ModifyMenu(tMenu, ID_MENU_POWER, MF_BYCOMMAND | MF_STRING | MF_POPUP, (UINT_PTR)pMenu, ("Power mode - " +
                 fan_conf->powers[mon->acpi->powers[fan_conf->lastProf->powerStage]]).c_str());
             EnableMenuItem(tMenu, ID_MENU_GMODE, mon->acpi->isGmode ? MF_ENABLED : MF_DISABLED);
-            CheckMenuItem(tMenu, ID_MENU_GMODE, fan_conf->lastProf->gmode_stage ? MF_CHECKED : MF_UNCHECKED);
+            CheckMenuItem(tMenu, ID_MENU_GMODE, fan_conf->lastProf->gmodeStage ? MF_CHECKED : MF_UNCHECKED);
 
             GetCursorPos(&lpClickPoint);
             SetForegroundWindow(hDlg);
@@ -364,17 +386,12 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             }
         } break;
         case WM_MOUSEMOVE: {
-            string name = "Power: ";
-            if (fan_conf->lastProf->gmode_stage)
-                name += "G-mode";
-            else
-                name += fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage]);
-
+            string tooltip = string("Power: ") + (fan_conf->lastProf->gmodeStage ? "G-mode" : *fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage]));
             for (int i = 0; i < mon->fansize; i++) {
-                name += "\n" + GetFanName(i, true);
+                tooltip.append("\n" + GetFanName(i, true));
             }
             niData->szTip[127] = 0;
-            strcpy_s(niData->szTip, min(127, name.length() + 1), name.c_str());
+            strcpy_s(niData->szTip, min(127, tooltip.length() + 1), tooltip.c_str());
             Shell_NotifyIcon(NIM_MODIFY, niData);
         } break;
         }
@@ -416,6 +433,21 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         case IDC_TEMP_LIST:
             TempUIEvent((NMLVDISPINFO*)lParam, tempList);
             break;
+        } break;
+    case WM_HSCROLL:
+        switch (LOWORD(wParam)) {
+        case TB_THUMBTRACK: case TB_ENDTRACK: {
+            if ((HWND)lParam == tcc_slider) {
+                fan_conf->lastProf->currentTCC = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
+                SetSlider(sTip1, fan_conf->lastProf->currentTCC);
+                mon->acpi->SetTCC(fan_conf->lastProf->currentTCC);
+            }
+            if ((HWND)lParam == xmp_slider) {
+                fan_conf->lastProf->memoryXMP = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
+                SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
+                mon->acpi->SetXMP(fan_conf->lastProf->memoryXMP);
+            }
+        } break;
         } break;
     case WM_CLOSE:
         SendMessage(hDlg, SW_SHOW, SIZE_MINIMIZED, 0);

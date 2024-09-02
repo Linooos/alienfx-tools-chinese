@@ -28,22 +28,6 @@ namespace AlienFan_SDK {
 		byte id, type;
 	};
 
-	enum {
-		getPowerID	 =	0,
-		getFanRPM	 =	1,
-		getFanPercent=	2,
-		getFanBoost	 =	3,
-		getTemp		 =	4,
-		getPowerMode =	5,
-		setFanBoost	 =	6,
-		setPowerMode =	7,
-		getGMode	 =	8,
-		setGMode	 =	9,
-		getSysID	 =	10,
-		getFanSensor =	11,
-		getMaxRPM	 =	12
-	};
-
 	union ALIENFAN_INTERFACE {
 		struct {
 			byte sub,
@@ -64,8 +48,11 @@ namespace AlienFan_SDK {
 		IWbemServices* m_WbemServices = NULL, * m_OHMService = NULL, * m_DiskService = NULL;
 		IWbemClassObject* m_InParamaters = NULL;
 		bool isAlienware = false,
-			 isSupported = false,
-			 isGmode = false;
+			isSupported = false,
+			isTcc = false,
+			isXMP = false,
+			isGmode = false;
+		byte maxTCC, maxOffset;
 
 		Control();
 		~Control();
@@ -105,9 +92,9 @@ namespace AlienFan_SDK {
 		// Result: raw value set or error
 		int SetPower(byte level);
 
-		// Get current system power value index at powers[]
-		// Result: power value index in powers[] or error
-		int GetPower();
+		// Get current system power value.
+		// Result: power value (raw true) or index in powers[] (raw false) or error
+		int GetPower(bool raw = false);
 
 		// Set system GPU limit level (0 - no limit, 3 - min. limit)
 		// Result: success or error
@@ -118,6 +105,18 @@ namespace AlienFan_SDK {
 
 		// Check G-mode state
 		int GetGMode();
+
+		// Get current TCC value
+		int GetTCC();
+
+		// Set TCC value, if possible
+		int SetTCC(byte tccValue);
+
+		// Get current XMP profile
+		int GetXMP();
+
+		// Set current XMP profile
+		int SetXMP(byte memXMP);
 
 		// Return current device ID
 		inline DWORD GetSystemID() { return systemID; };

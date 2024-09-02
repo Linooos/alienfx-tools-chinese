@@ -16,6 +16,7 @@ public:
 	map<byte,map<WORD, byte>> senBoosts;
 	WORD powerMode = 0;
 	WORD fansize, powerSize, sensorSize;
+	int systemID;
 
 	MonHelper();
 	~MonHelper();
@@ -26,5 +27,6 @@ public:
 	int GetPowerMode();
 	void SetPowerMode(WORD newMode);
 	void ResetBoost();
+	void SetOC();
 };
 

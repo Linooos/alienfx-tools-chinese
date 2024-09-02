@@ -72,7 +72,7 @@ namespace AlienFX_SDK {
 	bool Functions::PrepareAndSend(const byte *command, vector<Afx_icommand> *mods) {
 		byte buffer[MAX_BUFFERSIZE];
 		DWORD written;
-		BOOL res = false;
+		BOOL res = false, needV8Feature = true;
 
 		memset(buffer, version == API_V6 ? 0xff :0, length);
 		memcpy(buffer, command, command[0] + 1);
@@ -81,11 +81,8 @@ namespace AlienFX_SDK {
 		if (mods) {
 			for (auto i = mods->begin(); i < mods->end(); i++)
 				memcpy(buffer + i->i, i->vval.data(), i->vval.size());
-			if (mods->begin()->vval.size() == 1) { // patch for V8
-				mods->clear();
-				mods = NULL;
-			} else
-				mods->clear();
+			needV8Feature = mods->front().vval.size() == 1;
+			mods->clear();
 		}
 
 		if (devHandle) // Is device initialized?
@@ -108,15 +105,14 @@ namespace AlienFX_SDK {
 				return ReadFile(devHandle, buffer, length, &written, NULL);
 				//break;
 			case API_V8:
-				if (mods) {
-					return WriteFile(devHandle, buffer, length, &written, NULL);
-				}
-				else
-				{
+				if (needV8Feature) {
 					res = HidD_SetFeature(devHandle, buffer, length);
 					Sleep(7);
 				}
-//				if (size == 4 || size == 8) {
+				else
+				{
+					return WriteFile(devHandle, buffer, length, &written, NULL);
+				}
 			}
 		return res;
 	}
@@ -539,7 +535,7 @@ chain++;
 				DebugPrint("SDK: Set light " + to_string(act->index) + "\n");
 				PrepareAndSend(COMMV1_color, SetMaskAndColor(&mods, 1 << act->index, *ca, c2));
 			}
-			DebugPrint("SDK: Loop\n");
+			//DebugPrint("SDK: Loop\n");
 			res = PrepareAndSend(COMMV1_loop);
 			chain++;
 			return res;
@@ -776,7 +772,8 @@ chain++;
 		case API_V3: case API_V2:
 			//if (!GetDeviceStatus())
 			//	Reset();
-			for (; i < 100 && GetDeviceStatus() != ALIENFX_V2_READY; i++) Sleep(10);
+			for (; i < 100 && GetDeviceStatus() != ALIENFX_V2_READY; i++) 
+				Sleep(10);
 			return i < 100;
 		case API_V4:
 			while (!IsDeviceReady()) Sleep(20);
@@ -791,12 +788,13 @@ chain++;
 		switch (version) {
 		case API_V3: case API_V2:
 			if (GetDeviceStatus())
-				for (; i < 100 && GetDeviceStatus() != ALIENFX_V2_BUSY; i++) Sleep(10);
-			return i != 100;
+				for (; i < 100 && GetDeviceStatus() != ALIENFX_V2_BUSY; i++) 
+					Sleep(10);
+			return i < 100;
 			break;
 		case API_V4: {
 			for (; i < 500 && GetDeviceStatus() != ALIENFX_V4_BUSY; i++) Sleep(20);
-			return i != 500;
+			return i < 500;
 		} break;
 		default:
 			return GetDeviceStatus();

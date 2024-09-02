@@ -99,7 +99,7 @@ void FXHelper::TestLight(AlienFX_SDK::Afx_device* dev, int id, bool force, bool 
 	DebugPrint("Testing light #" + to_string(id));
 	if (dev && dev->dev) {
 		DebugPrint(", have device");
-		AlienFX_SDK::Afx_lightblock c = { (byte)oldtest, { wp ? Code2Act(&dev->white) : AlienFX_SDK::Afx_action({0})} };
+		AlienFX_SDK::Afx_action c = { wp ? Code2Act(&dev->white) : AlienFX_SDK::Afx_action({0})};
 
 		if (force && dev->lights.size()) {
 			vector<byte> opLights;
@@ -107,20 +107,20 @@ void FXHelper::TestLight(AlienFX_SDK::Afx_device* dev, int id, bool force, bool 
 			for (auto lIter = dev->lights.begin(); lIter != dev->lights.end(); lIter++)
 				if (lIter->lightid != id && !(lIter->flags & ALIENFX_FLAG_POWER))
 					opLights.push_back((byte)lIter->lightid);
-			dev->dev->SetMultiColor(&opLights, c.act.front());
+			dev->dev->SetMultiColor(&opLights, c);
 			dev->dev->UpdateColors();
 		}
 
 		if (id != oldtest) {
 			if (oldtest >= 0) {
 				DebugPrint(", remove old");
-				dev->dev->SetAction(&c);
+				dev->dev->SetColor(oldtest, c);
+				oldtest = -1;
 			}
-			c.index = (byte)(oldtest = id);
 			if (id >= 0) {
 				DebugPrint(", set");
-				c.act.front() = Code2Act(&conf->testColor);
-				dev->dev->SetAction(&c);
+				dev->dev->SetColor(id, Code2Act(&conf->testColor));
+				oldtest = id;
 			}
 			dev->dev->UpdateColors();
 		}
@@ -218,7 +218,7 @@ void FXHelper::SetState(bool force) {
 	// Lights on state...
 	conf->stateOn = conf->lightsOn && stateScreen && (!conf->offOnBattery || conf->statePower);
 	// Dim state...
-	conf->stateDimmed = conf->dimmed || conf->activeProfile->flags & PROF_DIMMED || (conf->dimmedBatt && !conf->statePower);
+	conf->stateDimmed = conf->dimmed || stateDim || conf->activeProfile->flags & PROF_DIMMED || (conf->dimmedBatt && !conf->statePower);
 	// Brightness
 	finalBrightness = (byte)(conf->stateOn ? conf->stateDimmed ? conf->dimmingPower : conf->fullPower : 0);
 	// Power button state
@@ -275,7 +275,12 @@ void FXHelper::Refresh(bool forced)
 #endif
 	conf->modifyProfile.lock();
 	for (auto it = conf->activeProfile->lightsets.begin(); it != conf->activeProfile->lightsets.end(); it++) {
-		RefreshOne(&(*it), false);
+		groupset set = *it;
+		// Hack for m16/18/g5525
+		if (set.color.size() == 1 && set.color.front().type == AlienFX_SDK::AlienFX_A_Color) {
+			set.color.push_back(set.color.front());
+		}
+		RefreshOne(/*&(*it)*/&set, false);
 	}
 	conf->modifyProfile.unlock();
 	if (!forced) {

@@ -1,8 +1,9 @@
-// alienfan-SDK.cpp : Defines the functions for the static library.
-//
 
+#include "alienfan-low.h"
 #include "alienfan-SDK.h"
 #include "alienfan-controls.h"
+
+#pragma warning(disable:4242)
 
 //#define _TRACE_
 
@@ -420,18 +421,15 @@ namespace AlienFan_SDK {
 		//}
 		//return -1;
 	}
-	int Control::GetPower() {
-		//if (devs[aDev].commandControlled) {
+	int Control::GetPower(bool raw) {
 		if (devs[aDev].delta)
 			return lastMode;
 		int pl = RunMainCommand(dev_controls.getPower);
+		if (raw || pl < 0)
+			return pl;
 		for (int i = 0; pl >= 0 && i < powers.size(); i++)
 			if (powers[i] == pl)
 				return i;
-		//} else {
-		//	// Always return Auto mode for system safety!
-		//	return 1;
-		//}
 		return -1;
 	}
 	int Control::SetGPU(int power) {

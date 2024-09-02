@@ -1,4 +1,5 @@
 #include "ConfigFan.h"
+#include "RegHelperLib.h"
 
 ConfigFan::ConfigFan() {
 
@@ -31,26 +32,13 @@ void ConfigFan::AddSensorCurve(fan_profile *prof, byte fid, WORD sid, byte* data
 	memcpy(cp->data(), data, lend);
 }
 
-DWORD ConfigFan::GetRegData(HKEY key, int vindex, char* name, byte** data) {
-	DWORD len, lend;
-	if (*data) {
-		delete[] * data;
-		*data = NULL;
-	}
-	if (RegEnumValue(key, vindex, name, &(len = 255), NULL, NULL, NULL, &lend) == ERROR_SUCCESS) {
-		*data = new byte[lend];
-		RegEnumValue(key, vindex, name, &(len = 255), NULL, NULL, *data, &lend);
-		return lend;
-	}
-	return 0;
-}
-
 void ConfigFan::Load() {
 
 	GetReg("StartAtBoot", &startWithWindows);
 	GetReg("StartMinimized", &startMinimized);
 	GetReg("UpdateCheck", &updateCheck, 1);
-	GetReg("LastPowerStage", &prof.powerSet/*power*/);
+	GetReg("LastPowerStage", &prof.powerSet);
+	GetReg("OC", &prof.ocSettings, 100);
 	GetReg("DisableAWCC", &awcc_disable);
 	GetReg("KeyboardShortcut", &keyShortcuts, 1);
 	GetReg("KeepSystemMode", &keepSystem, 1);
@@ -67,7 +55,7 @@ void ConfigFan::Load() {
 			continue;
 		}
 		if (sscanf_s(name, "SensorName-%hd-%hd", &sid, &fid) == 2) {
-			sensors[MAKEWORD(fid, sid)] = (char*)inarray;
+			sensors[MAKEWORD(fid, sid)] = GetRegString(inarray, lend);
 			continue;
 		}
 	}
@@ -80,7 +68,7 @@ void ConfigFan::Load() {
 	powers[0] = "Manual";
 	for (int vindex = 0; lend = GetRegData(keyPowers, vindex, name, &inarray); vindex++) {
 		if (sscanf_s(name, "Power-%hd", &fid) == 1) { // Power names
-			powers[(byte)fid] = (char*)inarray;
+			powers[(byte)fid] = GetRegString(inarray, lend);
 		}
 	}
 }
@@ -102,6 +90,7 @@ void ConfigFan::Save() {
 	SetReg("StartAtBoot", startWithWindows);
 	SetReg("StartMinimized", startMinimized);
 	SetReg("LastPowerStage", prof.powerSet);
+	SetReg("OC", prof.ocSettings);
 	SetReg("UpdateCheck", updateCheck);
 	SetReg("DisableAWCC", awcc_disable);
 	SetReg("KeyboardShortcut", keyShortcuts);
@@ -134,31 +123,11 @@ void ConfigFan::Save() {
 	}
 }
 
-string ConfigFan::GetPowerName(int index) {
-	auto pwr = &powers[index];
-	if (pwr->empty()) {
-		switch (index) {
-		case 160:
-			*pwr = string("均衡模式");
-			break;
-		case 161:
-			*pwr = string("性能模式");
-			break;
-		case 162:
-			*pwr = string("电池模式");
-			break;
-		case 163:
-			*pwr = string("安静模式");
-			break;
-		case 164:
-			*pwr = string("芜湖模式");
-		break;
-    	default:
-			
+string* ConfigFan::GetPowerName(int index) {
+	string* pwr = &powers[index];
+	if (pwr->empty())
 		*pwr = "Level " + to_string(index);
-	}
-	}
-	return *pwr;
+	return pwr;
 }
 
 void ConfigFan::UpdateBoost(byte fanID, byte boost, WORD rpm) {

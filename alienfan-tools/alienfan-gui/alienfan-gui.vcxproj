@@ -165,6 +165,9 @@
     <ProjectReference Include="..\..\Common\Common.vcxproj">
       <Project>{3d4ef0c4-282c-4318-8fbb-133514a8f0dc}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\RegHelperLib\RegHelperLib.vcxproj">
+      <Project>{5dcb3394-1906-4fef-8543-83a3fb8a25f8}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\alienfan-SDK\alienfan-SDK.vcxproj" Condition="'$(Configuration)' == 'Release_V1'">
       <Project>{41343b7c-6c9f-4ad4-9d27-050b3d76290d}</Project>
     </ProjectReference>

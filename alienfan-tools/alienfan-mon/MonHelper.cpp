@@ -18,6 +18,8 @@ MonHelper::MonHelper() {
 		powerSize = (WORD)acpi->powers.size();
 		sensorSize = (WORD)acpi->sensors.size();
 		oldPower = powerMode = GetPowerMode();
+		systemID = acpi->GetSystemID();
+		SetOC();
 		Start();
 	}
 }
@@ -31,10 +33,17 @@ MonHelper::~MonHelper() {
 	delete acpi;
 }
 
+void MonHelper::SetOC()
+{
+	acpi->SetTCC(fan_conf->lastProf->currentTCC);
+	acpi->SetXMP(fan_conf->lastProf->memoryXMP);
+}
+
 void MonHelper::ResetBoost() {
 	boostRaw.clear();
 	lastBoost.clear();
 	if (!powerMode) {
+		DebugPrint("Mon: Boost reset\n");
 		for (int i = 0; i < fansize; i++) {
 			acpi->SetFanBoost(i, 0);
 		}
@@ -44,13 +53,9 @@ void MonHelper::ResetBoost() {
 void MonHelper::Start() {
 	// start thread...
 	if (!monThread) {
-		// Stuck fan fix
-		//acpi->SetPower(0xa0);
-		//SetCurrentMode();
+		SetCurrentMode();
 		monThread = new ThreadHelper(CMonProc, this, fan_conf->pollingRate, THREAD_PRIORITY_BELOW_NORMAL);
-#ifdef _DEBUG
-		OutputDebugString("Mon thread start.\n");
-#endif
+		DebugPrint("Mon thread start.\n");
 	}
 	else {
 		Stop();
@@ -62,31 +67,30 @@ void MonHelper::Stop() {
 	if (monThread) {
 		delete monThread;
 		monThread = NULL;
-		//if (fan_conf->keepSystem)
-		//	SetCurrentMode(oldPower);
 		ResetBoost();
-#ifdef _DEBUG
-		OutputDebugString("Mon thread stop.\n");
-#endif
+		DebugPrint("Mon thread stop.\n");
 	}
 }
 
 void MonHelper::SetCurrentMode(int newMode) {
 	if (newMode < 0)
-		newMode = fan_conf->lastProf->gmode_stage ? powerSize : fan_conf->lastProf->powerStage;
-	int cmode = GetPowerMode();
-	if (newMode != cmode) {
-		acpi->SetPower(0xa0);
+		newMode = fan_conf->lastProf->gmodeStage ? powerSize : fan_conf->lastProf->powerStage;
+	//int cmode = GetPowerMode();
+	if (newMode != powerMode) {
 		if (newMode < powerSize) {
-			if (cmode == powerSize) {
-				acpi->SetGMode(false);
+			if (powerMode == powerSize) {
+				acpi->SetGMode(0);
 			}
 			acpi->SetPower(acpi->powers[newMode]);
+			ResetBoost();
+			DebugPrint("Mon: Power mode switch from " + (powerMode == powerSize ? "G-mode" : to_string(powerMode)) + " to " + to_string(newMode) + "\n");
 		}
-		else
-			acpi->SetGMode(true);
+		else {
+			acpi->SetPower(0xa0);
+			acpi->SetGMode(1);
+			DebugPrint("Mon: Power mode switch from " + to_string(powerMode) + " to G-mode\n");
+		}
 		powerMode = newMode;
-		ResetBoost();
 	}
 }
 
@@ -99,12 +103,22 @@ byte MonHelper::GetFanPercent(byte fanID)
 }
 
 int MonHelper::GetPowerMode() {
-	return acpi->GetGMode() ? powerSize : acpi->GetPower();
+	if (acpi->GetGMode()) {
+		if (systemID != 4800) { // buggy G25 BIOS fix
+			return powerSize;
+		} else {
+			int cmode = acpi->GetPower(true);
+			if (cmode == 0xab || cmode < 0)
+				return powerSize;
+		}
+	}
+	return acpi->GetPower();
 }
 
 void MonHelper::SetPowerMode(WORD newMode) {
-	if (!(fan_conf->lastProf->gmode_stage = (newMode == powerSize)))
+	if (newMode < powerSize)
 		fan_conf->lastProf->powerStage = newMode;
+	fan_conf->lastProf->gmodeStage = newMode == powerSize;
 	SetCurrentMode(newMode);
 }
 
@@ -112,6 +126,7 @@ void CMonProc(LPVOID param) {
 	MonHelper* src = (MonHelper*) param;
 	AlienFan_SDK::Control* acpi = src->acpi;
 	bool modified = false;
+	fan_profile* active = NULL;
 
 	// update values:
 	// temps..
@@ -129,7 +144,10 @@ void CMonProc(LPVOID param) {
 		src->fanRpm[i] = acpi->GetFanRPM(i);
 	}
 
-	fan_profile* active = fan_conf->lastProf; // protection from change profile
+	if (active != fan_conf->lastProf) {
+		active = fan_conf->lastProf; // protection from change profile
+		src->SetOC();
+	}
 
 #ifdef _DEBUG
 	if (!active)
@@ -138,6 +156,7 @@ void CMonProc(LPVOID param) {
 
 	if (src->inControl && active) {
 		// check power mode
+		src->powerMode = src->GetPowerMode();
 		src->SetCurrentMode();
 
 		if (!src->powerMode && modified) {
@@ -179,11 +198,10 @@ void CMonProc(LPVOID param) {
 							+ to_string(boostOld) + ", new " + to_string(curBoostRaw) + ")!\n");
 					}
 					if (curBoostRaw != boostOld) {
-						acpi->SetFanBoost(i, curBoostRaw);
+						int res = acpi->SetFanBoost(i, curBoostRaw);
 						src->boostRaw[i] = curBoostRaw;
-						//src->boostCooked[i] = curBoost;
-						//DebugPrint(("Boost for fan#" + to_string(i) + " changed from " + to_string(src->boostRaw[i])
-						//	+ " to " + to_string(src->boostSets[i]) + "\n").c_str());
+						//DebugPrint("Boost for fan#" + to_string(i) + " changed from " + to_string(boostOld)
+						//	+ " to " + to_string(curBoostRaw) + ", result " + to_string(res) + "\n");
 					}
 				}
 				else

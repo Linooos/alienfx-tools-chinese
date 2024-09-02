@@ -330,7 +330,7 @@ string GetFanName(int ind, bool forTray = false) {
         }
         fname += " " + to_string(ind + 1) + " - " + to_string(mon->fanRpm[ind]);
         if (forTray && !fan_conf->lastProf->powerStage)
-            fname += " (" + to_string(mon->boostRaw[ind]) + ")";
+            fname += " (" + to_string(mon->senValues[mon->lastBoost[ind]]/*mon->boostRaw[ind]*/) + ")";
     }
     return fname;
 }
@@ -358,7 +358,7 @@ void ReloadFanView(HWND list) {
 void ReloadPowerList(HWND list) {
     ComboBox_ResetContent(list);
     for (auto i = mon->acpi->powers.begin(); i != mon->acpi->powers.end(); i++)
-        ComboBox_AddString(list, (LPARAM)(fan_conf->GetPowerName(*i).c_str()));
+        ComboBox_AddString(list, (LPARAM)(fan_conf->GetPowerName(*i)->c_str()));
     if (mon->acpi->isGmode)
         ComboBox_AddString(list, (LPARAM)("G-Mode"));
     ComboBox_SetCurSel(list, mon->powerMode);
@@ -472,9 +472,9 @@ void FanUIEvent(NMLISTVIEW* lParam, HWND fanList, HWND tempList) {
 
 void AlterGMode(HWND power_list) {
     if (mon->acpi->isGmode) {
-        fan_conf->lastProf->gmode_stage = !fan_conf->lastProf->gmode_stage;
+        fan_conf->lastProf->gmodeStage = !fan_conf->lastProf->gmodeStage;
         mon->SetCurrentMode();
         ComboBox_SetCurSel(power_list, mon->powerMode);
-        BlinkNumLock(2 + fan_conf->lastProf->gmode_stage);
+        BlinkNumLock(2 + fan_conf->lastProf->gmodeStage);
     }
 }

@@ -1,6 +1,7 @@
 #include "ConfigHandler.h"
 #include "ConfigFan.h"
-#include "common.h"
+#include "RegHelperLib.h"
+#include "Common.h"
 #include "resource.h"
 
 extern HWND mDlg;
@@ -111,20 +112,6 @@ void ConfigHandler::SetReg(char *text, DWORD value) {
 	RegSetValueEx( hKeyMain, text, 0, REG_DWORD, (BYTE*)&value, sizeof(DWORD) );
 }
 
-DWORD ConfigHandler::GetRegData(HKEY key, int vindex, char* name, byte** data) {
-	DWORD len, lend;
-	if (*data) {
-		delete[] * data;
-		*data = NULL;
-	}
-	if (RegEnumValue(key, vindex, name, &(len = 255), NULL, NULL, NULL, &lend) == ERROR_SUCCESS) {
-		*data = new byte[lend];
-		RegEnumValue(key, vindex, name, &(len = 255), NULL, NULL, *data, &lend);
-		return lend;
-	}
-	return 0;
-}
-
 void ConfigHandler::Load() {
 
 	DWORD size_c = 16*sizeof(DWORD);// 4 * 16
@@ -177,7 +164,7 @@ void ConfigHandler::Load() {
 	// Profiles...
 	for (int vindex = 0; lend = GetRegData(hKeyProfiles, vindex, name, &data); vindex++) {
 		if (sscanf_s(name, "Profile-%d", &pid) == 1) {
-			FindCreateProfile(pid)->name = (char*)data;
+			FindCreateProfile(pid)->name = GetRegString(data, lend);
 			continue;
 		}
 		if (sscanf_s(name, "Profile-triggers-%d", &pid) == 1) {
@@ -189,11 +176,11 @@ void ConfigHandler::Load() {
 			continue;
 		}
 		if (sscanf_s(name, "Profile-app-%d-%d", &pid, &appid) == 2) {
-			FindCreateProfile(pid)->triggerapp.push_back((char*)data);
+			FindCreateProfile(pid)->triggerapp.push_back(GetRegString(data, lend));
 			continue;
 		}
 		if (sscanf_s(name, "Profile-script-%d", &pid) == 1) {
-			FindCreateProfile(pid)->script = (char*)data;
+			FindCreateProfile(pid)->script = GetRegString(data, lend);
 			continue;
 		}
 		int senid, fanid;
@@ -210,6 +197,12 @@ void ConfigHandler::Load() {
 			if (!prof->fansets)
 				prof->fansets = new fan_profile();
 			((fan_profile*)prof->fansets)->powerSet = *(DWORD*)data;
+		}
+		if (sscanf_s(name, "Profile-OC-%d", &pid) == 1) {
+			prof = FindCreateProfile(pid);
+			if (!prof->fansets)
+				prof->fansets = new fan_profile();
+			((fan_profile*)prof->fansets)->ocSettings = *(DWORD*)data;
 		}
 	}
 	// Loading zones...
@@ -419,6 +412,8 @@ void ConfigHandler::Save() {
 			// save powers..
 			name = "Profile-power-" + profID;
 			RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_DWORD, (BYTE*)&((fan_profile*)prof->fansets)->powerSet, sizeof(DWORD));
+			name = "Profile-OC-" + profID;
+			RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_DWORD, (BYTE*)&((fan_profile*)prof->fansets)->ocSettings, sizeof(DWORD));
 			// save fans...
 			fan_conf->SaveSensorBlocks(hKeyProfiles, "Profile-fan-" + profID, ((fan_profile*)prof->fansets));
 		}
@@ -427,25 +422,12 @@ void ConfigHandler::Save() {
 
 zonemap* ConfigHandler::FindZoneMap(int gid, bool reset) {
 	zoneUpdate.lock();
-	//for (auto gpos = zoneMaps.begin(); gpos != zoneMaps.end(); gpos++)
-	//	if (gpos->first == gid) {
-	//		if (reset) {
-	//			zoneMaps.erase(gpos);
-	//			break;
-	//		}
-	//		else {
-	//			zoneUpdate.unlock();
-	//			return &(*gpos);
-	//		}
-	//	}
-	if (!(zoneMaps[gid].gMinX == 255 || reset)) {
+		if (!(zoneMaps[gid].gMinX == 255 || reset)) {
 		zoneUpdate.unlock();
 		return &zoneMaps[gid];
 	}
 
 	// create new zoneMap
-	//zoneMaps.push_back({ (DWORD)gid, mainGrid->id });
-	//auto zone = &zoneMaps.back();
 	auto zone = &zoneMaps[gid];
 	*zone = { mainGrid->id };
 
@@ -484,7 +466,7 @@ zonemap* ConfigHandler::FindZoneMap(int gid, bool reset) {
 						//break;
 					}
 				// Ignore light if not in grid
-				if (cl.x < 255) {
+				if (cl.x < 255 && cl.y < 255) {
 					zone->gMaxX = max(zone->gMaxX, cl.x);
 					zone->gMaxY = max(zone->gMaxY, cl.y);
 					zone->gMinX = min(zone->gMinX, cl.x);

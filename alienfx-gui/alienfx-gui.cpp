@@ -113,8 +113,9 @@ void FillAllDevs() {
 	conf->afx_dev.AlienFXAssignDevices(false, mon ? mon->acpi : NULL);
 	if (conf->afx_dev.activeDevices) {
 		fxhl->Start();
-		fxhl->SetState();
+		fxhl->SetState(true);
 		fxhl->UpdateGlobalEffect(NULL);
+		fxhl->Refresh(true);
 	}
 }
 
@@ -442,9 +443,6 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			needUpdateFeedback = true;
 			CreateThread(NULL, 0, CUpdateCheck, &conf->niData, 0, NULL);
 			break;
-		//case IDC_BUTTON_MINIMIZE:
-		//	SendMessage(hDlg, WM_SIZE, SIZE_MINIMIZED, 0);
-		//	break;
 		case IDC_BUTTON_REFRESH:
 			fxhl->Refresh();
 			break;
@@ -578,35 +576,22 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			}
 			break;
 		case WM_MOUSEMOVE: {
-			string name;
-			//DebugPrint("Printing profile...\n");
-			if (conf->activeProfile)
-				name = conf->activeProfile->name;
-			//DebugPrint("Printing effects...\n");
+			string name = conf->activeProfile->name;
 			if (conf->stateEffects) {
-				name += string("\nEffects: ") + (eve->sysmon ? "M" : "m")
+				name.append(string("\nEffects: ") + (eve->sysmon ? "M" : "m")
 					+ (eve->capt ? "A" : "a")
 					+ (eve->audio ? "H" : "h")
-					+ (eve->grid ? "G" : "g");
+					+ (eve->grid ? "G" : "g"));
 			}
 			if (mon) {
-				//DebugPrint("Printing power mode...\n");
-				name += "\n";
-				if (fan_conf->lastProf->gmode_stage || fan_conf->lastProf->powerStage >= mon->powerSize)
-					name += "G-mode";
-				else
-					name += fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage]);
-				name += " power";
+				name.append(string("\n") + (fan_conf->lastProf->gmodeStage ? "G-mode" : *fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage])) + " power");
 				for (int i = 0; i < mon->fansize; i++) {
-					//DebugPrint("Printing fan " + to_string(i) + "...\n");
-					name += "\n" + GetFanName(i, true);
+					name.append("\n" + GetFanName(i, true));
 				}
 			}
-			//DebugPrint("Printing done, length " + to_string(name.length()) + "\n");
 			conf->niData.szTip[127] = 0;
 			strcpy_s(conf->niData.szTip, min(127, name.length() + 1), name.c_str());
 			Shell_NotifyIcon(NIM_MODIFY, &conf->niData);
-			//DebugPrint("Pos: " + to_string(GET_X_LPARAM(lParam)) + ", " + to_string(GET_Y_LPARAM(lParam)) + "\n");
 		} break;
 		}
 	} break;
@@ -667,12 +652,15 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			eve->ChangePowerState();
 			break;
 		case PBT_POWERSETTINGCHANGE: {
-			if (fxhl->stateScreen != (!conf->offWithScreen || ((POWERBROADCAST_SETTING*)lParam)->Data[0] ||
-				(((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_LIDSWITCH_STATE_CHANGE && GetSystemMetrics(SM_CMONITORS) > 1))) {
-				fxhl->stateScreen = !fxhl->stateScreen;
-				DebugPrint("Screen state changed to " + to_string(fxhl->stateScreen) + " (source: " +
-					(((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_LIDSWITCH_STATE_CHANGE ? "Lid" : "Monitor")
-					+ ")\n");
+			if (conf->offWithScreen &&
+				((((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_LIDSWITCH_STATE_CHANGE && GetSystemMetrics(SM_CMONITORS) == 1) ||
+				((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_CONSOLE_DISPLAY_STATE ||
+				((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_SESSION_DISPLAY_STATUS ||
+				((POWERBROADCAST_SETTING*)lParam)->PowerSetting == GUID_MONITOR_POWER_ON)) {
+				// react state change state
+				fxhl->stateScreen = ((POWERBROADCAST_SETTING*)lParam)->Data[0] > 0;
+				fxhl->stateDim = ((POWERBROADCAST_SETTING*)lParam)->Data[0] == 2;
+				DebugPrint("Screen state " + to_string(((POWERBROADCAST_SETTING*)lParam)->Data[0]) + "\n");
 				eve->ChangeEffectMode();
 			}
 		} break;

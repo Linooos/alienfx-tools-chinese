@@ -21,11 +21,19 @@ struct fan_profile {
 	union {
 		struct {
 			WORD powerStage;
-			WORD gmode_stage;
+			WORD gmodeStage;
 		};
 		DWORD powerSet = 0;
 	};
 	map<byte,map<WORD, sen_block>> fanControls;
+	// OC block
+	union {
+		struct {
+			byte currentTCC;
+			byte memoryXMP;
+		};
+		DWORD ocSettings = 100;
+	};
 };
 
 struct fan_overboost {
@@ -63,8 +71,8 @@ public:
 
 	void AddSensorCurve(fan_profile* prof, byte fid, WORD sid, byte* data, DWORD lend);
 	void SaveSensorBlocks(HKEY key, string pname, fan_profile* data);
-	DWORD GetRegData(HKEY key, int vindex, char* name, byte** data);
-	string GetPowerName(int index);
+	//DWORD GetRegData(HKEY key, int vindex, char* name, byte** data);
+	string* GetPowerName(int index);
 	string GetSensorName(AlienFan_SDK::ALIENFAN_SEN_INFO* acpi);
 	void UpdateBoost(byte fanID, byte boost, WORD rpm);
 	int GetFanScale(byte fanID);
