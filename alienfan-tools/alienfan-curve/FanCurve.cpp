@@ -360,7 +360,7 @@ void ReloadPowerList(HWND list) {
     for (auto i = mon->acpi->powers.begin(); i != mon->acpi->powers.end(); i++)
         ComboBox_AddString(list, (LPARAM)(fan_conf->GetPowerName(*i)->c_str()));
     if (mon->acpi->isGmode)
-        ComboBox_AddString(list, (LPARAM)("G-Mode"));
+        ComboBox_AddString(list, (LPARAM)("Gģʽ"));
     ComboBox_SetCurSel(list, mon->powerMode);
 }
 

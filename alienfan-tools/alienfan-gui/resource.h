@@ -1,7 +1,8 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
-// Used by alienfan-gui.rc
+// Microsoft Visual C++ 生成的包含文件。
+// 供 alienfan-gui.rc 使用
 //
+#define IDOK                            1
 #define IDD_ABOUTBOX                    103
 #define IDM_ABOUT                       104
 #define IDM_EXIT                        105
@@ -15,13 +16,13 @@
 #define IDC_FAN_LIST                    1003
 #define IDC_BUT_MINIMIZE                1005
 #define IDC_BUT_CLOSE                   1006
-#define IDC_STATIC_VERSION              1009
-#define IDC_SYSLINK_HOMEPAGE            1010
 #define IDC_MAX_RESET                   1016
 #define IDC_BUT_RESETBOOST              1017
 #define IDC_EDIT1                       1018
 #define IDC_EDIT_POLLING                1018
 #define IDC_FC_ID                       1019
+#define IDC_SYSLINK_HOMEPAGE            1043
+#define IDC_STATIC_VERSION              1048
 #define IDC_AC_BOOST                    1124
 #define IDC_DC_BOOST                    1125
 #define IDC_BUT_OVER                    1130

@@ -154,19 +154,19 @@ string *ConfigFan::GetPowerName(int index)
 	{
 		switch (index) {
 		case 160:
-			*pwr = string("balance");
+			*pwr = string("均衡模式");
 			break;
 		case 161:
-			*pwr = string("performance");
+			*pwr = string("性能模式");
 			break;
 		case 162:
-			*pwr = string("bettery");
+			*pwr = string("电池模式");
 			break;
 		case 163:
-			*pwr = string("quiet");
+			*pwr = string("安静模式");
 			break;
 		case 164:
-			*pwr = string("extra");
+			*pwr = string("满速模式");
 			break;
 		default:
 			*pwr = "Level " + std::to_string(index);

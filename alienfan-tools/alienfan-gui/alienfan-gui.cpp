@@ -23,7 +23,7 @@ MonHelper* mon = NULL;                          // Monitoring object
 UINT newTaskBar = RegisterWindowMessage(TEXT("TaskbarCreated"));
 HWND mDlg = NULL, fanWindow = NULL, tipWindow = NULL;
 
-static const vector<string> pModes{ "Off", "Enabled", "Aggressive", "Efficient", "Efficient aggressive" };
+static const vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
 
 GUID* sch_guid, perfset;
 
@@ -265,7 +265,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             break;
         case IDM_SAVE:
             fan_conf->Save();
-            ShowNotification(niData, "Configuration saved!", "Configuration saved successfully.");
+            ShowNotification(niData, "配置保存完成", "配置保存完成");
             break;
         case IDM_SETTINGS_STARTWITHWINDOWS:
             ToggleValue(fan_conf->startWithWindows, wmId);
@@ -292,7 +292,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             break;
         case IDC_FAN_RESET:
         {
-            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "Do you want to clear all fan curves?", "Warning",
+            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "清除所有风扇曲线？", "警告",
                 MB_YESNO | MB_ICONWARNING) == IDYES) {
                 fan_conf->lastProf->fanControls[fan_conf->lastSelectedFan].clear();
                 ReloadTempView(tempList);
@@ -334,7 +334,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
     } break;
     case WM_APP + 2:
         EnableWindow(power_list, (bool)lParam);
-        SetWindowText(GetDlgItem(hDlg, IDC_BUT_OVER), (bool)lParam ? "Check\n Max. boost" : "Stop check");
+        SetWindowText(GetDlgItem(hDlg, IDC_BUT_OVER), (bool)lParam ? "检测\n 最高转速" : "停止");
         break;
     case WM_APP + 1:
     {
@@ -355,7 +355,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
                 mInfo.fState = (i == fan_conf->lastProf->powerStage) ? MF_CHECKED : MF_UNCHECKED;
                 InsertMenuItem(pMenu, i, false, &mInfo);
             }
-            ModifyMenu(tMenu, ID_MENU_POWER, MF_BYCOMMAND | MF_STRING | MF_POPUP, (UINT_PTR)pMenu, ("Power mode - " +
+            ModifyMenu(tMenu, ID_MENU_POWER, MF_BYCOMMAND | MF_STRING | MF_POPUP, (UINT_PTR)pMenu, ("性能模式 -> " +
                 fan_conf->powers[mon->acpi->powers[fan_conf->lastProf->powerStage]]).c_str());
             EnableMenuItem(tMenu, ID_MENU_GMODE, mon->acpi->isGmode ? MF_ENABLED : MF_DISABLED);
             CheckMenuItem(tMenu, ID_MENU_GMODE, fan_conf->lastProf->gmodeStage ? MF_CHECKED : MF_UNCHECKED);
