@@ -38,7 +38,7 @@ void ConfigFan::Load() {
 	GetReg("StartMinimized", &startMinimized);
 	GetReg("UpdateCheck", &updateCheck, 1);
 	GetReg("LastPowerStage", &prof.powerSet);
-	GetReg("OC", &prof.ocSettings, 100);
+	GetReg("OC", &prof.ocSettings, (0xff << 8 | 100));
 	GetReg("DisableAWCC", &awcc_disable);
 	GetReg("KeyboardShortcut", &keyShortcuts, 1);
 	GetReg("KeepSystemMode", &keepSystem, 1);
@@ -123,14 +123,39 @@ void ConfigFan::Save() {
 	}
 }
 
-string* ConfigFan::GetPowerName(int index) {
-	if (powers[index].empty())
-		powers[index] = "Level " + to_string(index);
-	return &powers[index];
+
+string *ConfigFan::GetPowerName(int index)
+{
+	string *pwr = &powers[index];
+	if (pwr->empty())
+	{
+		switch (index) {
+		case 160:
+			*pwr = string("均衡模式");
+			break;
+		case 161:
+			*pwr = string("性能模式");
+			break;
+		case 162:
+			*pwr = string("电池模式");
+			break;
+		case 163:
+			*pwr = string("安静模式");
+			break;
+		case 164:
+			*pwr = string("满速模式");
+			break;
+		default:
+			*pwr = "Level " + std::to_string(index);
+		}
+		
+	}
+	return pwr;
 }
 
-void ConfigFan::UpdateBoost(byte fanID, byte boost, WORD rpm) {
-	boosts[fanID] = { (byte)boost, max(rpm, boosts[fanID].maxRPM) };
+void ConfigFan::UpdateBoost(byte fanID, byte boost, WORD rpm)
+{
+	boosts[fanID] = {(byte)boost, max(rpm, boosts[fanID].maxRPM)};
 	Save();
 }
 
