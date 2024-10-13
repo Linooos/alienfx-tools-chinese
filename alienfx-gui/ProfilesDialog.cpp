@@ -34,10 +34,10 @@ vector<deviceeffect>::iterator FindDevEffect(int type) {
 }
 
 const static vector<string> ge_names[2]{ // 0 - v8, 1 - v5
-	{ "Off", "Color or Morph", "Pulse", "Back Morph", "Breath", "Spectrum",
+	{ "关闭", "Color or Morph", "Pulse", "Back Morph", "Breath", "Spectrum",
 	"One key (K)", "Circle out (K)", "Wave out (K)", "Right wave (K)", "Default", "Rain Drop (K)",
 	"Wave", "Rainbow wave", "Circle wave", "Random white (K)" },
-	{ "Off", "Static", "Breathing", "Side Wave", "Dual Wave", "Pulse", "Morph", "Bounce", "Laser", "Rainbow" }};
+	{ "关闭", "单色静止", "呼吸", "走马灯（单层波）", "双层波", "脉冲", "渐变", "双向波", "射线", "彩虹渐变" }};
 /*
 	0 - off
 	1 - static color
@@ -50,7 +50,7 @@ const static vector<string> ge_names[2]{ // 0 - v8, 1 - v5
 	12 - off
 	14 - rainbow
 */
-const static vector<string> cModeNames{ "Single-color", "Multi-color", "Rainbow" };
+const static vector<string> cModeNames{ "单色", "多色", "彩虹" };
 const static vector<int> ge_types[2]{ { 0,1,2,3,7,8,9,10,11,12,13,14,15,16,17,18 },
 	{ 0,1,2,3,4,8,9,10,11,14 } };
 const static vector<int> cModeTypes{ 1, 2, 3 };
