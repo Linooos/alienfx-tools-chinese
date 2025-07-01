@@ -14,7 +14,7 @@ extern FXHelper* fxhl;
 
 int effID = 0;
 
-const char* lightEffectNames[] { "??", "??", "??", "??", "??", "??", "" };
+const char* lightEffectNames[] { "ÑÕÉ«", "Âö³å", "±äÐÎ", "ºôÎü", "¹âÆ×", "²Êºç", "" };
 
 void SetEffectData(HWND hDlg) {
 	bool hasEffects = mmap && mmap->color.size();

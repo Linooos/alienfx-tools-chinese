@@ -84,6 +84,7 @@
 #define IDC_SYSLINK_HOMEPAGE            1043
 #define IDC_BUTTON_EFFCLR4              1043
 #define IDC_ISPOWERBUTTON               1044
+#define IDC_SYSLINK_HOMEPAGE2           1044
 #define IDC_CUTLEVEL                    1046
 #define IDC_BUTTON_RESET                1046
 #define IDC_STATUS_BLINK                1047

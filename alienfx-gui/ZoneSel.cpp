@@ -159,7 +159,7 @@ BOOL CALLBACK SelectLightsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 	return true;
 }
 
-static const string gaugetypes[] = { "??", "??", "??", "???", "???", "???", ""};
+static const string gaugetypes[] = { "关闭", "平行", "垂直", "左对角", "右对角", "辐射", ""};
 
 BOOL CALLBACK ZoneSelectionDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 

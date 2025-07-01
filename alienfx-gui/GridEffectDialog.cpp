@@ -101,8 +101,8 @@ void UpdateEffectInfo(HWND hDlg) {
 	RebuildGEColorsList(hDlg);
 }
 
-const char* triggerNames[] = { "??", "??", "??", "??", "????", "" },
-	*effectTypeNames[] = { "???", "??", "??", "??", "??", "??", ""};
+const char* triggerNames[] = { "关闭", "连续", "按键", "事件", "映射", "" },
+	*effectTypeNames[] = { "跑马灯", "波谱", "渐变", "填充", "星光", "消逝", ""};
 
 BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND speed_slider = GetDlgItem(hDlg, IDC_SLIDER_SPEED),
