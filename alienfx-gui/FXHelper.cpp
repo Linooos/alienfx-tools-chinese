@@ -2,21 +2,22 @@
 #include "EventHandler.h"
 #include "FXHelper.h"
 #include "common.h"
+#include "CaptureHelper.h"
 #include "GridHelper.h"
 #include "WSAudioIn.h"
-#include <iterator>
+#include "MonHelper.h"
 
-extern AlienFX_SDK::Afx_action Code2Act(AlienFX_SDK::Afx_colorcode* c);
-extern bool IsLightInGroup(DWORD lgh, AlienFX_SDK::Afx_group* grp);
+extern AlienFX_SDK::Afx_action Code2Act(AlienFX_SDK::Afx_colorcode c);
 
 extern EventHandler* eve;
 extern HANDLE haveLightFX;
+extern MonHelper* mon;
 
 DWORD WINAPI CLightsProc(LPVOID param);
 
 FXHelper::FXHelper() {
 	stopQuery = CreateEvent(NULL, false, false, NULL);
-	haveNewElement = CreateEvent(NULL, false, false, NULL);
+	haveNewElement = CreateEvent(NULL, true, false, NULL);
 	haveLightFX = CreateEvent(NULL, true, false, "LightFXActive");
 }
 
@@ -26,6 +27,16 @@ FXHelper::~FXHelper() {
 	CloseHandle(haveNewElement);
 	CloseHandle(haveLightFX);
 };
+
+void FXHelper::FillAllDevs() {
+	Stop();
+	if (conf->afx_dev.AlienFXEnumDevices(mon ? mon->acpi : NULL))
+		conf->afx_dev.AlienFXApplyDevices();
+	if (conf->afx_dev.activeDevices) {
+		Start();
+		SetState(true);
+	}
+}
 
 AlienFX_SDK::Afx_action FXHelper::BlendPower(double power, AlienFX_SDK::Afx_action* from, AlienFX_SDK::Afx_action* to) {
 	return { 0,0,0,
@@ -67,29 +78,31 @@ void FXHelper::SetZone(groupset* grp, vector<AlienFX_SDK::Afx_action>* actions, 
 				SetLight(i->lgh, actions);
 		}
 		else {
-			zonemap zone = *conf->FindZoneMap(grp->group);
-			for (auto t = zone.lightMap.begin(); t < zone.lightMap.end(); t++)
+			zonemap* zone = conf->FindZoneMap(grp->group);
+			conf->zoneUpdate.lockRead();
+			for (auto t = zone->lightMap.begin(); t < zone->lightMap.end(); t++)
 				switch (grp->gauge) {
 				case 1: // horizontal
-					SetZoneLight(t->light, t->x, zone.gMaxX, zone.scaleX, grp->gaugeflags, actions, power);
+					SetZoneLight(t->light, t->x, zone->gMaxX, zone->scaleX, grp->gaugeflags, actions, power);
 					break;
 				case 2: // vertical
-					SetZoneLight(t->light, t->y, zone.gMaxY, zone.scaleY, grp->gaugeflags, actions, power);
+					SetZoneLight(t->light, t->y, zone->gMaxY, zone->scaleY, grp->gaugeflags, actions, power);
 					break;
 				case 3: // diagonal
-					SetZoneLight(t->light, t->x + t->y, zone.gMaxX + zone.gMaxY, zone.scaleX + zone.scaleY, grp->gaugeflags, actions, power);
+					SetZoneLight(t->light, t->x + t->y, zone->gMaxX + zone->gMaxY, zone->scaleX + zone->scaleY, grp->gaugeflags, actions, power);
 					break;
 				case 4: // back diagonal
-					SetZoneLight(t->light, zone.gMaxX - 1 - t->x + t->y, zone.gMaxX + zone.gMaxY, zone.scaleX + zone.scaleY, grp->gaugeflags, actions, power);
+					SetZoneLight(t->light, zone->gMaxX - 1 - t->x + t->y, zone->gMaxX + zone->gMaxY, zone->scaleX + zone->scaleY, grp->gaugeflags, actions, power);
 					break;
 				case 5: // radial
 					SetZoneLight(t->light,
-						abs(zone.gMaxX / 2 - t->x) + abs(zone.gMaxY / 2 - t->y),
-						zone.gMaxX + zone.gMaxY,
-						zone.scaleX + zone.scaleY,
+						abs(zone->gMaxX / 2 - t->x) + abs(zone->gMaxY / 2 - t->y),
+						zone->gMaxX + zone->gMaxY,
+						zone->scaleX + zone->scaleY,
 						grp->gaugeflags, actions, power);
 					break;
 				}
+			conf->zoneUpdate.unlockRead();
 		}
 	}
 }
@@ -100,7 +113,7 @@ void FXHelper::TestLight(AlienFX_SDK::Afx_device* dev, int id, bool force, bool 
 	DebugPrint("Testing light #" + to_string(id));
 	if (dev && dev->dev) {
 		DebugPrint(", have device");
-		AlienFX_SDK::Afx_action c = { wp ? Code2Act(&dev->white) : AlienFX_SDK::Afx_action({0})};
+		AlienFX_SDK::Afx_action c = { wp ? Code2Act(dev->white) : AlienFX_SDK::Afx_action({0})};
 
 		if (force && dev->lights.size()) {
 			vector<byte> opLights;
@@ -120,7 +133,7 @@ void FXHelper::TestLight(AlienFX_SDK::Afx_device* dev, int id, bool force, bool 
 			}
 			if (id >= 0) {
 				DebugPrint(", set");
-				dev->dev->SetColor(id, Code2Act(&conf->testColor));
+				dev->dev->SetColor(id, Code2Act(conf->testColor));
 				oldtest = id;
 			}
 			dev->dev->UpdateColors();
@@ -129,17 +142,9 @@ void FXHelper::TestLight(AlienFX_SDK::Afx_device* dev, int id, bool force, bool 
 	DebugPrint("\n");
 }
 
-void FXHelper::ResetPower(AlienFX_SDK::Afx_device* dev)
-{
-	if (dev && dev->dev && dev->version < AlienFX_SDK::API_V5) {
-		vector<AlienFX_SDK::Afx_lightblock> act{ { (byte)63, {{AlienFX_SDK::AlienFX_A_Power, 3, 0x64}, {AlienFX_SDK::AlienFX_A_Power, 3, 0x64}} } };
-		dev->dev->SetPowerAction(&act);
-		ShowNotification(&conf->niData, "Warning", "You may need to reset light system hardware!");
-	}
-}
-
 bool FXHelper::CheckEvent(LightEventData* eData, event* e) {
-	byte ccut = e->cut;
+#define ccut e->cut
+//	byte ccut = e->cut;
 	switch (e->source) {
 	case 0: return eData->HDD; break;
 	case 1: return eData->NET; break;
@@ -182,13 +187,13 @@ void FXHelper::SetGaugeGrid(groupset* grp, zonemap* zone, int phase, AlienFX_SDK
 void FXHelper::QueryCommand(LightQueryElement &lqe) {
 	if (updateThread)
 		if (WaitForSingleObject(haveLightFX, 0) == WAIT_TIMEOUT) {
-			modifyQuery.lock();
+			modifyQuery.lockWrite();
 			if (wasLFX) {
 				wasLFX = false;
 				lightQuery.push({ 0, 2 });
 			}
 			lightQuery.push(lqe);
-			modifyQuery.unlock();
+			modifyQuery.unlockWrite();
 			SetEvent(haveNewElement);
 		}
 		else
@@ -207,9 +212,27 @@ void FXHelper::QueryUpdate(bool force) {
 void FXHelper::SetLight(DWORD lgh, vector<AlienFX_SDK::Afx_action>* actions)
 {
 	auto dev = conf->afx_dev.GetDeviceById(LOWORD(lgh));
-	if (dev && dev->dev && actions->size()) {
-		LightQueryElement newBlock{ dev, (byte)HIWORD(lgh), 0, (byte)actions->size() };
+	if (lightsNoDelay && dev && dev->dev && actions->size()) {
+		LightQueryElement newBlock{ dev->pid, (byte)HIWORD(lgh), (byte)
+			(conf->afx_dev.GetFlags(dev, HIWORD(lgh)) & ALIENFX_FLAG_POWER ? 3 : 0),
+			(byte)actions->size() };
 		memcpy(newBlock.actions, actions->data(), newBlock.actsize * sizeof(AlienFX_SDK::Afx_action));
+		for (int i = 0; i < newBlock.actsize; i++) {
+			AlienFX_SDK::Afx_action* action = &newBlock.actions[i];
+			// Check and change if Accent
+			if (action->type & 0xf0) {
+				action->type &= 0xf;
+				AlienFX_SDK::Afx_colorcode c;
+				c.ci = conf->accentColor;
+				action->r = c.b; action->g = c.g; action->b = c.r;
+			}
+			// gamma-correction...
+			if (conf->gammaCorrection) {
+				action->r = ((UINT)action->r * action->r * dev->white.r) / 65025; // (255 * 255);
+				action->g = ((UINT)action->g * action->g * dev->white.g) / 65025; // (255 * 255);
+				action->b = ((UINT)action->b * action->b * dev->white.b) / 65025; // (255 * 255);
+			}
+		}
 		QueryCommand(newBlock);
 	}
 }
@@ -217,7 +240,7 @@ void FXHelper::SetLight(DWORD lgh, vector<AlienFX_SDK::Afx_action>* actions)
 void FXHelper::SetState(bool force) {
 	int oldBr = finalBrightness; bool oldPM = finalPBState;
 	// Lights on state...
-	conf->stateOn = conf->lightsOn && stateScreen && (!conf->offOnBattery || conf->statePower);
+	conf->stateOn = conf->lightsOn && stateScreen && (!conf->offOnBattery || conf->statePower) && stateAction;
 	// Dim state...
 	conf->stateDimmed = conf->dimmed || stateDim || conf->activeProfile->flags & PROF_DIMMED || (conf->dimmedBatt && !conf->statePower);
 	// Brightness
@@ -228,23 +251,27 @@ void FXHelper::SetState(bool force) {
 	if (force || oldBr != finalBrightness || oldPM != finalPBState) {
 		if (mDlg)
 			conf->SetIconState();
-		if (force)
+		if (force && !finalPBState)
 			QueryCommand(LightQueryElement({ NULL, 1, 2 }));
 		QueryCommand(LightQueryElement({ NULL, 0, 2 }));
 	}
 }
 
 void FXHelper::UpdateGlobalEffect(AlienFX_SDK::Afx_device* dev, bool reset) {
-	conf->modifyProfile.lock();
-	for (auto it = conf->activeProfile->effects.begin(); it < conf->activeProfile->effects.end(); it++) {
-		auto cdev = dev ? dev : conf->afx_dev.GetDeviceById(it->pid, it->vid);
-		if (cdev->dev) {
-			cdev->dev->SetGlobalEffects(reset ? 0 : it->globalEffect, it->globalMode, it->colorMode, it->globalDelay,
-				{ 0,0,0,it->effColor1.r, it->effColor1.g, it->effColor1.b },
-				{ 0,0,0,it->effColor2.r, it->effColor2.g, it->effColor2.b });
+	conf->modifyProfile.lockRead();
+
+	for (auto cdev = conf->afx_dev.fxdevs.begin(); cdev != conf->afx_dev.fxdevs.end(); cdev++) {
+		if (cdev->dev && cdev->dev->IsHaveGlobal() && (!dev || (dev->devID == cdev->devID))) {
+			if (reset && cdev->version == AlienFX_SDK::API_V5)
+				cdev->dev->SetGlobalEffects(0, 1, 1, 0, { 0 }, { 0 });
+			for (auto it = conf->activeProfile->effects[cdev->devID].begin(); it != conf->activeProfile->effects[cdev->devID].end(); it++) {
+				cdev->dev->SetGlobalEffects(it->globalEffect, it->globalMode, it->colorMode, it->globalDelay,
+					it->effColor1,
+					it->effColor2);
+			}
 		}
 	}
-	conf->modifyProfile.unlock();
+	conf->modifyProfile.unlockRead();
 }
 
 void FXHelper::Start() {
@@ -274,142 +301,134 @@ void FXHelper::Refresh(bool forced)
 		DebugPrint("Forced ");
 	DebugPrint("Refresh initiated.\n");
 #endif
-	conf->modifyProfile.lock();
+	conf->modifyProfile.lockRead();
 	for (groupset& it : conf->activeProfile->lightsets) {
-		//groupset set = *it;
-		// Hack for m16/18/g5525
-		//if (set.color.size() == 1 && set.color.front().type == AlienFX_SDK::AlienFX_A_Color) {
-		//	set.color.push_back(set.color.front());
-		//}
-		RefreshOne(&it, false);
+		RefreshZone(&it, false);
 	}
-	conf->modifyProfile.unlock();
-	if (!forced) {
-		RefreshCounters();
-		RefreshAmbient();
-		RefreshHaptics();
-		RefreshGrid();
+	conf->modifyProfile.unlockRead();
+	if (!forced && conf->stateEffects && eve) {
+		RefreshCounters(NULL, true);
+		RefreshAmbient(true);
+		RefreshHaptics(true);
+		RefreshGrid(true);
 	}
 	QueryUpdate(forced);
 }
 
-void FXHelper::RefreshOne(groupset* map, bool update) {
+void FXHelper::RefreshZone(groupset* map, bool update) {
 
 	if (map && map->color.size()) {
-		SetZone(map, &map->color, 0);
+		SetZone(map, &map->color, 0.0);
 		if (update)
 			QueryUpdate();
 	}
 }
 
-void FXHelper::RefreshCounters(LightEventData* data)
+void FXHelper::RefreshCounters(LightEventData* data, bool fromRefresh)
 {
-	if (lightsNoDelay && eve->sysmon) {
-		bool force = !data, wasChanged = false;
-		AlienFX_SDK::Afx_group* grp;
-		if (!data)
-			data = &eData;
-		else
-			blinkStage = !blinkStage;
-
-		conf->modifyProfile.lock();
-		for (auto Iter = conf->activeProfile->lightsets.begin(); Iter != conf->activeProfile->lightsets.end(); Iter++) {
-			if (Iter->events.size() && (grp = conf->afx_dev.GetGroupById(Iter->group))) {
-				bool havePower = conf->FindZoneMap(Iter->group)->havePower;
-				vector<AlienFX_SDK::Afx_action> actions;
-				bool hasDiff = false;
-				int lVal = 0, cVal = 0;
-				double fCoeff = 0.0;
-				if (Iter->fromColor && Iter->color.size()) {
-					actions.push_back(havePower && conf->statePower ? Iter->color.back() : Iter->color.front());
-					actions.back().type = 0;
-				}
-				for (auto e = Iter->events.begin(); e != Iter->events.end(); e++) {
-					switch (e->state) {
-					case MON_TYPE_PERF: // counter
-						switch (e->source) {
-						case 0: lVal = eData.CPU; cVal = data->CPU; break;
-						case 1: lVal = eData.RAM; cVal = data->RAM; break;
-						case 2: lVal = eData.HDD; cVal = data->HDD; break;
-						case 3: lVal = eData.GPU; cVal = data->GPU; break;
-						case 4: lVal = eData.NET; cVal = data->NET; break;
-						case 5: lVal = eData.Temp; cVal = data->Temp; break;
-						case 6: lVal = eData.Batt; cVal = data->Batt; break;
-						case 7: lVal = eData.Fan; cVal = data->Fan; break;
-						case 8: lVal = eData.PWR; cVal = data->PWR; break;
-						case 9: lVal = eData.PWM; cVal = data->PWM; break;
-						}
-						if (force || (lVal != cVal && (cVal > e->cut || lVal >= e->cut))) {
-							hasDiff = true;
-							cVal -= e->cut;
-							fCoeff = cVal > 0 ? cVal / (100.0 - e->cut) : 0.0;
-							if (actions.empty())
-								actions.push_back(e->from);
-							actions.push_back(!Iter->gauge || (Iter->gaugeflags & GAUGE_GRADIENT) ? BlendPower(fCoeff, &actions.back(), &e->to) : e->to);
-							if (!Iter->gauge)
-								actions.erase(actions.begin());
-						}
-						break;
-					case MON_TYPE_IND: { // indicator
-						if (e->source == 7) {
-							if (force || eData.ACP != data->ACP || eData.BST != data->BST || (data->BST & 14)) {
-								hasDiff = true;
-								if (actions.empty())
-									actions.push_back(e->from);
-								if (!data->ACP || ((data->BST & 8) && blinkStage)) {
-									actions.erase(actions.begin());
-									actions.push_back((data->BST & 6) && blinkStage ? AlienFX_SDK::Afx_action{ 0 } : e->to);
-								}
-							}
-						}
-						else {
-							cVal = CheckEvent(data, &(*e));
-
-							if (force || (cVal + CheckEvent(&eData, &(*e))) == 1 || (e->mode && cVal)) {
-								hasDiff = true;
-								if (actions.empty())
-									actions.push_back(e->from);
-								if (cVal && (!e->mode || blinkStage)) {
-									actions.erase(actions.begin());
-									actions.push_back(e->to);
-								}
-							}
-						}
-					} break;
+	DebugPrint("Counter refresh started\n");
+	bool force = !data, wasChanged = false, havePower;
+	AlienFX_SDK::Afx_group* grp;
+	if (force)
+		data = &eData;
+	else
+		blinkStage = !blinkStage;
+	conf->modifyProfile.lockRead();
+	for (auto& Iter : conf->activeProfile->lightsets) {
+		if (Iter.events.size() && (grp = conf->afx_dev.GetGroupById(Iter.group))) {
+			havePower = conf->FindZoneMap(Iter.group)->havePower;
+			vector<AlienFX_SDK::Afx_action> actions;
+			bool hasDiff = false;
+			int lVal = 0, cVal = 0;
+			double fCoeff = 0.0;
+			if (Iter.fromColor && Iter.color.size()) {
+				actions.push_back(havePower && conf->statePower ? Iter.color.back() : Iter.color.front());
+				actions.back().type = 0;
+			}
+			for (auto e = Iter.events.begin(); e != Iter.events.end(); e++) {
+				if (actions.empty())
+					actions.push_back(e->from);
+				switch (e->state) {
+				case MON_TYPE_PERF: // counter
+					switch (e->source) {
+					case 0: lVal = eData.CPU; cVal = data->CPU; break;
+					case 1: lVal = eData.RAM; cVal = data->RAM; break;
+					case 2: lVal = eData.HDD; cVal = data->HDD; break;
+					case 3: lVal = eData.GPU; cVal = data->GPU; break;
+					case 4: lVal = eData.NET; cVal = data->NET; break;
+					case 5: lVal = eData.Temp; cVal = data->Temp; break;
+					case 6: lVal = eData.Batt; cVal = data->Batt; break;
+					case 7: lVal = eData.Fan; cVal = data->Fan; break;
+					case 8: lVal = eData.PWR; cVal = data->PWR; break;
+					case 9: lVal = eData.PWM; cVal = data->PWM; break;
 					}
-				}
-
-				// set if changed
-				if (hasDiff) {
-					wasChanged = true;
-
-					if (havePower)
-						// ToDo: check about 2 lights in actions
-						if (conf->statePower) {
-							actions.push_back(Iter->color.back());
+					if (force || (lVal != cVal && (cVal > e->cut || lVal >= e->cut))) {
+						hasDiff = true;
+						cVal -= e->cut;
+						fCoeff = cVal > 0 ? cVal / (100.0 - e->cut) : 0.0;
+						actions.push_back(!Iter.gauge || (Iter.gaugeflags & GAUGE_GRADIENT) ? BlendPower(fCoeff, &actions.back(), &e->to) : e->to);
+						if (!Iter.gauge)
+							actions.erase(actions.begin());
+					}
+					break;
+				case MON_TYPE_IND: { // indicator
+					if (e->source == 7) {
+						if (force || eData.ACP != data->ACP || eData.BST != data->BST || (data->BST & 14)) {
+							hasDiff = true;
+							if (!data->ACP || ((data->BST & 8) && blinkStage)) {
+								actions.erase(actions.begin());
+								actions.push_back((data->BST & 6) && blinkStage ? AlienFX_SDK::Afx_action{ 0 } : e->to);
+							}
 						}
-						else {
-							actions.insert(actions.begin(), Iter->color.front());
-						}
+					}
+					else {
+						cVal = CheckEvent(data, &(*e));
 
-					SetZone(&(*Iter), &actions, fCoeff);
+						if (force || (cVal + CheckEvent(&eData, &(*e))) == 1 || (e->mode && cVal)) {
+							hasDiff = true;
+							if (cVal && (!e->mode || blinkStage)) {
+								actions.erase(actions.begin());
+								actions.push_back(e->to);
+							}
+						}
+					}
+				} break;
 				}
 			}
-		}
-		conf->modifyProfile.unlock();
-		if (wasChanged) {
-			QueryUpdate();
+
+			// set if changed
+			if (hasDiff) {
+				wasChanged = true;
+
+				if (havePower)
+					// ToDo: check about 2 lights in actions
+					if (conf->statePower) {
+						actions.push_back(Iter.color.back());
+					}
+					else {
+						actions.insert(actions.begin(), Iter.color.front());
+					}
+
+				SetZone(&Iter, &actions, fCoeff);
+			}
 		}
 	}
+	conf->modifyProfile.unlockRead();
+	if (wasChanged && !fromRefresh) {
+		DebugPrint("Counters changed, updating\n");
+		QueryUpdate();
+		//memcpy(&eData, data, sizeof(LightEventData));
+	}
+	DebugPrint("Counters update finished\n");
 }
 
-void FXHelper::RefreshAmbient() {
-	if (lightsNoDelay && eve->capt) {
+void FXHelper::RefreshAmbient(bool fromRefresh) {
+	if (eve->capt) {
 		UCHAR* img = ((CaptureHelper*)eve->capt)->imgz;
 		UINT shift = 255 - conf->amb_shift, gridsize = conf->amb_grid.x * conf->amb_grid.y;
 		vector<AlienFX_SDK::Afx_action> actions{ {0} };
 		bool wasChanged = false;
-		conf->modifyProfile.lock();
+		conf->modifyProfile.lockRead();
 		for (auto it = conf->activeProfile->lightsets.begin(); it != conf->activeProfile->lightsets.end(); it++)
 			if (it->ambients.size()) {
 				ULONG r = 0, g = 0, b = 0, dsize = (UINT)it->ambients.size();
@@ -436,18 +455,18 @@ void FXHelper::RefreshAmbient() {
 					SetZone(&(*it), &actions);
 				}
 			}
-		conf->modifyProfile.unlock();
-		if (wasChanged)
+		conf->modifyProfile.unlockRead();
+		if (wasChanged && !fromRefresh)
 			QueryUpdate();
 	}
 }
 
-void FXHelper::RefreshHaptics() {
-	if (lightsNoDelay && eve->audio) {
+void FXHelper::RefreshHaptics(bool fromRefresh) {
+	if (eve->audio) {
 		int* freq = ((WSAudioIn*)eve->audio)->freqs;
 		vector<AlienFX_SDK::Afx_action> actions;
 		bool wasChanged = false;
-		conf->modifyProfile.lock();
+		conf->modifyProfile.lockRead();
 		for (auto mIter = conf->activeProfile->lightsets.begin(); mIter != conf->activeProfile->lightsets.end(); mIter++) {
 			if (mIter->haptics.size()) {
 				// Now for each freq block...
@@ -500,24 +519,23 @@ void FXHelper::RefreshHaptics() {
 				}
 			}
 		}
-		conf->modifyProfile.unlock();
-		if (wasChanged)
+		conf->modifyProfile.unlockRead();
+		if (wasChanged && !fromRefresh)
 			QueryUpdate();
 	}
 }
 
-void FXHelper::RefreshGrid() {
-	if (lightsNoDelay && eve->grid) {
-		bool wasChanged = false, noAmb = true;
+void FXHelper::RefreshGrid(bool fromRefresh) {
+	if (eve->grid) {
+		bool wasChanged = false;
 		vector<AlienFX_SDK::Afx_action> cur{ {0} };
-		conf->modifyProfile.lock();
+		conf->modifyProfile.lockRead();
 		for (auto ce = conf->activeProfile->lightsets.begin(); ce != conf->activeProfile->lightsets.end(); ce++) {
 			if (ce->effect.trigger && !ce->gridop.passive) {
-				switch (ce->effect.trigger) {
-				case 4: { // ambient
-					CaptureHelper* capt = ((GridHelper*)eve->grid)->capt;
+				if (ce->effect.trigger == 4) { // ambient
+					CaptureHelper* capt = (CaptureHelper*)ce->effect.capt;
 					// update lights
-					if (capt && capt->needUpdate && noAmb) {
+					if (capt && capt->needUpdate) {
 						capt->needUpdate = false;
 						UINT shift = 255 - conf->amb_shift;
 						auto zone = *conf->FindZoneMap(ce->group);
@@ -529,19 +547,18 @@ void FXHelper::RefreshGrid() {
 							SetLight(lgh->light, &cur);
 						}
 						wasChanged = true;
-						noAmb = false;
 					}
-				} break;
-				default:
+				} else {
 					if (ce->effect.effectColors.size()) {
 						// prepare vars..
 						grideffop* effop = &ce->gridop;
 						grideffect* eff = &ce->effect;
 						// check for initial repaint
-						if (effop->stars.empty()) {
-							cur.front() = Code2Act(&eff->effectColors.front());
+						if (effop->stars.empty() || fromRefresh) {
+							cur.front() = Code2Act(eff->effectColors.front());
 							SetZone(&(*ce), &cur);
-							effop->stars.resize(1);
+							effop->stars.resize(eff->width);
+							wasChanged = true;
 						}
 						// calculate phase
 						int cTact = effop->current_tact++;
@@ -549,15 +566,14 @@ void FXHelper::RefreshGrid() {
 
 						if (phase == effop->effsize * effop->lmp) {
 							effop->passive = true;
-							// ToDo: clean zone
 							continue;
 						}
 
 						int backIndex = (eff->flags & GE_FLAG_PHASE ? phase : (phase / effop->effsize)) % (eff->effectColors.size());
-						AlienFX_SDK::Afx_action from = Code2Act(eff->flags & GE_FLAG_BACK ? &eff->effectColors.front() :
-							&eff->effectColors[backIndex]);
+						AlienFX_SDK::Afx_action from = Code2Act(eff->flags & GE_FLAG_BACK ? eff->effectColors.front() :
+							eff->effectColors[backIndex]);
 						backIndex++;
-						AlienFX_SDK::Afx_action to = Code2Act(&eff->effectColors[backIndex != eff->effectColors.size() ? backIndex : 0]);
+						AlienFX_SDK::Afx_action to = Code2Act(eff->effectColors[backIndex != eff->effectColors.size() ? backIndex : 0]);
 
 						phase %= effop->effsize;
 
@@ -577,15 +593,14 @@ void FXHelper::RefreshGrid() {
 								uniform_int_distribution<int> id(0, (int)grp->lights.size() - 1);
 								uniform_int_distribution<int> count(5, 25);
 								uniform_int_distribution<int> clr(1, (int)eff->effectColors.size() - 1);
-								effop->stars.resize(eff->width);
 								for (auto star = effop->stars.begin(); star != effop->stars.end(); star++) {
 									if (star->count >= 0 && star->lightID) {
 										// change star color phase
 										int halfW = star->maxCount >> 1;
 										power = 1.0 - (double)abs(halfW - star->count) / halfW;
 										cur.front() = { BlendPower(power,
-											&Code2Act(&eff->effectColors.front()),
-											&Code2Act(&eff->effectColors.at(star->colorIndex))) };
+											&Code2Act(eff->effectColors.front()),
+											&Code2Act(eff->effectColors.at(star->colorIndex))) };
 										SetLight(star->lightID, &cur);
 										star->count--;
 									}
@@ -617,8 +632,8 @@ void FXHelper::RefreshGrid() {
 
 									if (ce->gaugeflags & GAUGE_GRADIENT) {
 										// Gradient fill
-										AlienFX_SDK::Afx_action grad = Code2Act(eff->flags & GE_FLAG_BACK ? &eff->effectColors.front() :
-											backIndex > 0 ? &eff->effectColors[backIndex - 1] : &eff->effectColors.back());
+										AlienFX_SDK::Afx_action grad = Code2Act(eff->flags & GE_FLAG_BACK ? eff->effectColors.front() :
+											backIndex > 0 ? eff->effectColors[backIndex - 1] : eff->effectColors.back());
 										for (int nf = 0; nf < effop->size - phase; nf++) {
 											// Gradient to previous color
 											SetGaugeGrid(&(*ce), &zone, effop->size - nf, &BlendPower((double)nf / (effop->size - phase), &grad, &to));
@@ -650,8 +665,8 @@ void FXHelper::RefreshGrid() {
 				}
 			}
 		}
-		conf->modifyProfile.unlock();
-		if (wasChanged)
+		conf->modifyProfile.unlockRead();
+		if (wasChanged && !fromRefresh)
 			QueryUpdate();
 	}
 }
@@ -661,102 +676,86 @@ DWORD WINAPI CLightsProc(LPVOID param) {
 	LightQueryElement current;
 
 	HANDLE waitArray[2]{ src->haveNewElement, src->stopQuery };
-	map<AlienFX_SDK::Afx_device*, vector<AlienFX_SDK::Afx_lightblock>> devs_query;
+	map<WORD, vector<AlienFX_SDK::Afx_lightblock>> devs_query;
 
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 
 	while (WaitForMultipleObjects(2, waitArray, false, INFINITE) == WAIT_OBJECT_0) {
 		while (src->lightQuery.size()) {
 
-			src->modifyQuery.lock();
+			src->modifyQuery.lockWrite();
 			current = src->lightQuery.front();
 			src->lightQuery.pop();
-			src->modifyQuery.unlock();
+			src->modifyQuery.unlockWrite();
 
 			switch (current.command) {
 			case 2: { // set brightness
 				bool pbstate = current.light || src->finalPBState, needRefresh = false;
-				byte fbright = (byte)(current.light ? !conf->lightsOn && conf->stateDimmed && conf->dimPowerButton ? conf->dimmingPower : conf->fullPower : src->finalBrightness);
+				byte fbright = (byte)(current.light ?
+					conf->stateDimmed && conf->dimPowerButton ? conf->dimmingPower : conf->fullPower
+					: src->finalBrightness);
+					//(byte)(current.light ? !conf->lightsOn && conf->stateDimmed && conf->dimPowerButton ? conf->dimmingPower : conf->fullPower : src->finalBrightness);
 				for (auto dev = conf->afx_dev.fxdevs.begin(); dev != conf->afx_dev.fxdevs.end(); dev++)
 					if (dev->dev) {
 						//DebugPrint("Set brightness " + to_string(src->finalBrightness) + " for device " + to_string(dev->pid) + "\n");
-						byte oldBr = dev->dev->bright;
-						dev->dev->SetBrightness(fbright, &dev->lights, pbstate);
-						switch (dev->version) {
-						case AlienFX_SDK::API_V2: case AlienFX_SDK::API_V3: case AlienFX_SDK::API_V6: case AlienFX_SDK::API_V7:
-							// They don't have hardware brightness, so need to set each light again.
-							needRefresh = needRefresh || !oldBr || dev->version > AlienFX_SDK::API_V3;
-						}
+						needRefresh |= dev->dev->SetBrightness(fbright, &dev->lights, pbstate);
 					}
 				if (needRefresh)
 					src->Refresh();
 			} break;
 			case 1: { // update command
 				for (auto devQ = devs_query.begin(); devQ != devs_query.end(); devQ++) {
-					if (devQ->first->dev) {
-						//DebugPrint("Updating device " + to_string(devQ->first) + ", " + to_string(devQ->second.size()) + " lights\n");
-						if (devQ->second.size()) {
-							devQ->first->dev->SetMultiAction(&devQ->second, current.light);
-							devQ->first->dev->UpdateColors();
-						}
-						if (devQ->first->dev->version == AlienFX_SDK::API_V5) {
-							src->UpdateGlobalEffect(devQ->first);
-						}
+					AlienFX_SDK::Afx_device* dev = conf->afx_dev.GetDeviceById(devQ->first);
+					//DebugPrint("Updating device " + to_string(devQ->first) + ", " + to_string(devQ->second.size()) + " lights\n");
+					if (devQ->second.size() && dev->version != AlienFX_SDK::API_UNKNOWN && conf->activeProfile->effects[dev->devID].empty()) {
+						dev->dev->SetMultiAction(&devQ->second, current.light);
+						//DebugPrint("Set action complete\n");
+						dev->dev->UpdateColors();
 					}
 					devQ->second.clear();
+					//DebugPrint("Update complete\n");
 				}
 			} break;
+			case 3: { // set power button
+				// Does it have 2 colors?
+				if (current.actsize < 2)
+					memcpy(&current.actions[1], current.actions, sizeof(AlienFX_SDK::Afx_action));
+				// Should we update it?
+				current.actions[0].type = current.actions[1].type = AlienFX_SDK::AlienFX_A_Power;
+				current.actsize = 2;
+				if (memcmp(src->pbstate[current.pid], current.actions, 2 * sizeof(AlienFX_SDK::Afx_action))) {
+
+					DebugPrint("Power button set to " +
+						to_string(current.actions[0].r) + "-" +
+						to_string(current.actions[0].g) + "-" +
+						to_string(current.actions[0].b) + "/" +
+						to_string(current.actions[1].r) + "-" +
+						to_string(current.actions[1].g) + "-" +
+						to_string(current.actions[1].b) + "\n");
+
+					memcpy(src->pbstate[current.pid], current.actions, 2 * sizeof(AlienFX_SDK::Afx_action));
+				}
+				else {
+					DebugPrint("Power button update skipped (blocked or same colors)\n");
+					continue;
+				}
+			} // no break here, need set light!
 			case 0: { // set light
-				WORD flags = conf->afx_dev.GetFlags(current.dev, current.light);
-				if (conf->gammaCorrection) {
-					for (int i = 0; i < current.actsize; i++) {
-						AlienFX_SDK::Afx_action* action = &current.actions[i];
-						// gamma-correction...
-						action->r = ((UINT)action->r * action->r * current.dev->white.r) / 65025; // (255 * 255);
-						action->g = ((UINT)action->g * action->g * current.dev->white.g) / 65025; // (255 * 255);
-						action->b = ((UINT)action->b * action->b * current.dev->white.b) / 65025; // (255 * 255);
-					}
-				}
-
-				// Is it power button?
-				if ((flags & ALIENFX_FLAG_POWER) /*&& dev->version && dev->version < AlienFX_SDK::API_V5*/) {
-					// Should we update it?
-					current.actions[0].type = current.actions[1].type = AlienFX_SDK::AlienFX_A_Power;
-					current.actsize = 2;
-					if (memcmp(src->pbstate[current.dev->pid], current.actions, 2 * sizeof(AlienFX_SDK::Afx_action))) {
-
-						DebugPrint("Power button set to " +
-							to_string(current.actions[0].r) + "-" +
-							to_string(current.actions[0].g) + "-" +
-							to_string(current.actions[0].b) + "/" +
-							to_string(current.actions[1].r) + "-" +
-							to_string(current.actions[1].g) + "-" +
-							to_string(current.actions[1].b) + "\n");
-
-						memcpy(src->pbstate[current.dev->pid], current.actions, 2 * sizeof(AlienFX_SDK::Afx_action));
-					}
-					else {
-						DebugPrint("Power button update skipped (blocked or same colors)\n");
-						continue;
-					}
-				}
 
 				// form actblock...
 				AlienFX_SDK::Afx_lightblock ablock{ current.light };
 				ablock.act.resize(current.actsize);
 				memcpy(ablock.act.data(), current.actions, current.actsize * sizeof(AlienFX_SDK::Afx_action));
+
 				// do we have another set for same light?
-				bool noSameLight = true;
-				for (AlienFX_SDK::Afx_lightblock& lp : devs_query[current.dev]) {
-					if (lp.index == current.light) {
-						lp.act = ablock.act;
-						noSameLight = false;
+				for (auto lp = devs_query[current.pid].begin(); lp != devs_query[current.pid].end(); lp++) {
+					if (lp->index == current.light) {
+						devs_query[current.pid].erase(lp);
 						break;
 					}
 				}
-				if (noSameLight) {
-					devs_query[current.dev].push_back(ablock);
-				}
+
+				devs_query[current.pid].push_back(ablock);
 			}
 			}
 		}

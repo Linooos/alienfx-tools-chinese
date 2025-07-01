@@ -17,31 +17,27 @@ using namespace std;
 HINSTANCE hInst;                                // current instance
 HWND sTip1 = 0, sTip2 = 0;
 
+int idc_version = IDC_STATIC_VERSION, idc_homepage = IDC_SYSLINK_HOMEPAGE; // for About
+
 ConfigFan* fan_conf = NULL;                     // Config...
 MonHelper* mon = NULL;                          // Monitoring object
 
 UINT newTaskBar = RegisterWindowMessage(TEXT("TaskbarCreated"));
 HWND mDlg = NULL, fanWindow = NULL, tipWindow = NULL;
 
-static const vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
+const char* pModes[] = { "关闭睿频", "启用睿频", "性能", "高效", "高效性能", ""};
 
 GUID* sch_guid, perfset;
 
-NOTIFYICONDATA niDataFC{ sizeof(NOTIFYICONDATA), 0, IDI_ALIENFANGUI, NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP, WM_APP + 1,
-        (HICON)LoadImage(GetModuleHandle(NULL),
-            MAKEINTRESOURCE(IDI_ALIENFANGUI),
-            IMAGE_ICON,
-            GetSystemMetrics(SM_CXSMICON),
-            GetSystemMetrics(SM_CYSMICON),
-            LR_DEFAULTCOLOR) };
+NOTIFYICONDATA niDataFC;
 extern NOTIFYICONDATA* niData;
 
 bool isNewVersion = false;
 bool needUpdateFeedback = false;
+bool wasAWCC = false;
 
 // Forward declarations of functions included in this code module:
 LRESULT CALLBACK    FanDialog(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    FanCurve(HWND, UINT, WPARAM, LPARAM);
 
 extern void ReloadFanView(HWND list);
@@ -66,6 +62,12 @@ void SetHotkeys() {
             UnregisterHotKey(mDlg, 20 + i);
 }
 
+void SetPowerState() {
+    SYSTEM_POWER_STATUS state;
+    GetSystemPowerStatus(&state);
+    fan_conf->acPower = state.ACLineStatus;
+}
+
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
@@ -80,18 +82,28 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     MSG msg{0};
 
     fan_conf = new ConfigFan();
-    fan_conf->wasAWCC = DoStopService(fan_conf->awcc_disable, true);
+    wasAWCC = DoStopAWCC(fan_conf->awcc_disable, true);
+    SetPowerState();
     mon = new MonHelper();
     hInst = hInstance;
+
+    niDataFC = { sizeof(NOTIFYICONDATA), 0, IDI_ALIENFANGUI, NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP, WM_APP + 1,
+        (HICON)LoadImage(hInst,
+            MAKEINTRESOURCE(IDI_ALIENFANGUI),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_DEFAULTCOLOR) };
+
     niData = &niDataFC;
 
     if (mon->acpi->isSupported) {
-        if (fan_conf->needDPTF)
-            CreateThread(NULL, 0, DPTFInit, fan_conf, 0, NULL);
+        //if (fan_conf->needDPTF)
+        //    CreateThread(NULL, 0, DPTFInit, fan_conf, 0, NULL);
         if (mDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_MAIN_VIEW), NULL, (DLGPROC)FanDialog)) {
 
             SendMessage(mDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIcon(hInst, MAKEINTRESOURCE(IDI_ALIENFANGUI)));
-            SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ALIENFANGUI), IMAGE_ICON, 16, 16, 0));
+            SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(hInst, MAKEINTRESOURCE(IDI_ALIENFANGUI), IMAGE_ICON, 16, 16, 0));
 
             SetHotkeys();
 
@@ -113,7 +125,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         WindowsStartSet(fan_conf->startWithWindows = false, "AlienFan-GUI");
     }
     delete mon;
-    DoStopService(fan_conf->wasAWCC, false);
+    DoStopAWCC(wasAWCC, false);
     Shell_NotifyIcon(NIM_DELETE, niData);
     fan_conf->Save();
     delete fan_conf;
@@ -135,14 +147,19 @@ void ToggleValue(DWORD& value, int cID) {
 
 void SetOCUI(HWND hDlg) {
     HWND tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC),
-        xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP);
+        xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP),
+        tcc_edit = GetDlgItem(hDlg, IDC_EDIT_TCC);
     // OC block
     EnableWindow(tcc_slider, fan_conf->ocEnable && mon->acpi->isTcc);
+    EnableWindow(tcc_edit, fan_conf->ocEnable && mon->acpi->isTcc);
     if (fan_conf->ocEnable && mon->acpi->isTcc) {
         SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
         sTip1 = CreateToolTip(tcc_slider, sTip1);
         SetSlider(sTip1, fan_conf->lastProf->currentTCC);
         SendMessage(tcc_slider, TBM_SETPOS, true, fan_conf->lastProf->currentTCC);
+
+        // Set edit box value to match slider
+        SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
     }
     EnableWindow(xmp_slider, fan_conf->ocEnable && mon->acpi->isXMP);
     if (fan_conf->ocEnable && mon->acpi->isXMP) {
@@ -159,7 +176,8 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC),
         xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP),
         tempList = GetDlgItem(hDlg, IDC_TEMP_LIST),
-        fanList = GetDlgItem(hDlg, IDC_FAN_LIST);
+        fanList = GetDlgItem(hDlg, IDC_FAN_LIST),
+        tcc_edit = GetDlgItem(hDlg, IDC_EDIT_TCC);
 
     if (message == newTaskBar) {
         // Started/restarted explorer...
@@ -172,7 +190,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         niData->hWnd = hDlg;
 
         while (!AddTrayIcon(niData, fan_conf->updateCheck))
-            Sleep(50);
+            Sleep(100);
 
         // set PerfBoost lists...
         IIDFromString(L"{be337238-0d82-4146-a960-4f3749d470c7}", &perfset);
@@ -204,6 +222,8 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_DISABLEAWCC, fan_conf->awcc_disable ? MF_CHECKED : MF_UNCHECKED);
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_KEYBOARDSHORTCUTS, fan_conf->keyShortcuts ? MF_CHECKED : MF_UNCHECKED);
         CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_RESTOREPOWERMODE, fan_conf->keepSystem ? MF_CHECKED : MF_UNCHECKED);
+        CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_ENABLEOC, fan_conf->ocEnable ? MF_CHECKED : MF_UNCHECKED);
+        CheckMenuItem(GetMenu(hDlg), IDM_SETTINGS_DISKSENSORS, fan_conf->diskSensors ? MF_CHECKED : MF_UNCHECKED);
         SetDlgItemInt(hDlg, IDC_EDIT_POLLING, fan_conf->pollingRate, false);
 
         // Set SystemID
@@ -234,6 +254,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         } break;
         case IDC_EDIT_POLLING:
             if (HIWORD(wParam) == EN_KILLFOCUS) {
+                mon->Stop();
                 fan_conf->pollingRate = GetDlgItemInt(hDlg, IDC_EDIT_POLLING, NULL, false);
                 mon->Start();
             }
@@ -292,7 +313,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             break;
         case IDM_SETTINGS_DISABLEAWCC:
             ToggleValue(fan_conf->awcc_disable, wmId);
-            fan_conf->wasAWCC = DoStopService((bool)fan_conf->awcc_disable != fan_conf->wasAWCC, fan_conf->wasAWCC);
+            wasAWCC = DoStopAWCC((bool)fan_conf->awcc_disable != wasAWCC, wasAWCC);
             break;
         case IDM_SETTINGS_RESTOREPOWERMODE:
             ToggleValue(fan_conf->keepSystem, wmId);
@@ -302,10 +323,17 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             mon->SetOC();
             SetOCUI(hDlg);
             break;
+        case IDM_SETTINGS_DISKSENSORS:
+            ToggleValue(fan_conf->diskSensors, wmId);
+            KillTimer(hDlg, 0);
+            delete mon;
+            mon = new MonHelper();
+            ReloadTempView(tempList);
+            SetTimer(hDlg, 0, fan_conf->pollingRate, NULL);
+            break;
         case IDC_FAN_RESET:
         {
-            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "清除所有风扇曲线？", "警告",
-                MB_YESNO | MB_ICONWARNING) == IDYES) {
+            if (WarningBox(hDlg, "清除所有风扇曲线？")) {
                 fan_conf->lastProf->fanControls[fan_conf->lastSelectedFan].clear();
                 ReloadTempView(tempList);
             }
@@ -324,8 +352,26 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             break;
         case IDC_BUT_RESETBOOST:
             if (mon->inControl)
-                fan_conf->boosts[fan_conf->lastSelectedFan] = { 100, (unsigned short)mon->acpi->GetMaxRPM(fan_conf->lastSelectedFan) };
+                fan_conf->boosts[fan_conf->lastSelectedFan].maxBoost = 100;
             break;
+        case IDC_EDIT_TCC:
+            switch (HIWORD(wParam)) {
+            case EN_CHANGE: {
+                // Doesn't need to check success, 0 will be out of range and not changed
+                int val = GetDlgItemInt(hDlg, IDC_EDIT_TCC, NULL, FALSE);
+                // Did it in range?
+                if (val && val == max(min(val, mon->acpi->maxTCC), mon->acpi->maxTCC - mon->acpi->maxOffset)) {
+                    // Set slider and value
+                    SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
+                    SetSlider(sTip1, val);
+                    mon->SetOC();
+                }
+            } break;
+            case EN_KILLFOCUS:
+                // Just set resulted value
+                SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+                break;
+            } break;
         }
     }
     break;
@@ -409,16 +455,20 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         }
         break;
     } break;
-    case WM_HOTKEY: {
-        if (wParam > 19 && wParam - 20 < mon->powerSize) {
-            mon->SetPowerMode((WORD)wParam - 20);
-            ComboBox_SetCurSel(power_list, fan_conf->lastProf->powerStage);
-            BlinkNumLock((int)wParam - 19);
-        } else
+    case WM_HOTKEY:
+        if (wParam == 6 || wParam > 19 && wParam - 20 < mon->powerSize) {
             if (wParam == 6) { // G-key for Dell G-series power switch
                 AlterGMode(power_list);
+                BlinkNumLock(mon->powerMode);
             }
-    } break;
+            else { // Power mode shortcut
+                mon->SetPowerMode((WORD)wParam - 20);
+                BlinkNumLock(mon->powerMode);
+            }
+            ComboBox_SetCurSel(power_list, mon->powerMode);
+            ShowNotification(niData, "Power mode switched!", "New power mode - " + (fan_conf->lastProf->gmodeStage ? "G-mode" : *fan_conf->GetPowerName(mon->acpi->powers[mon->powerMode])));
+        }
+        break;
     case WM_MENUCOMMAND: {
         int idx = LOWORD(wParam);
         switch (GetMenuItemID((HMENU)lParam, idx)) {
@@ -432,8 +482,8 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             AlterGMode(power_list);
             break;
         case ID_TRAYMENU_POWER_SELECTED:
-            fan_conf->lastProf->powerStage = idx;
-            ComboBox_SetCurSel(power_list, fan_conf->lastProf->powerStage);
+            mon->SetPowerMode(idx);
+            ComboBox_SetCurSel(power_list, mon->powerMode);
             break;
         }
     } break;
@@ -452,12 +502,14 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             if ((HWND)lParam == tcc_slider) {
                 fan_conf->lastProf->currentTCC = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip1, fan_conf->lastProf->currentTCC);
-                mon->acpi->SetTCC(fan_conf->lastProf->currentTCC);
+                // Update edit box
+                SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+                mon->SetOC();
             }
             if ((HWND)lParam == xmp_slider) {
                 fan_conf->lastProf->memoryXMP = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-                mon->acpi->SetXMP(fan_conf->lastProf->memoryXMP);
+                mon->SetOC();
             }
         } break;
         } break;
@@ -477,9 +529,10 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
     case WM_POWERBROADCAST:
         switch (wParam) {
         case PBT_APMRESUMEAUTOMATIC:
+            SetPowerState();
             mon->Start();
             if (fan_conf->updateCheck) {
-                needUpdateFeedback = false;
+                //needUpdateFeedback = false;
                 CreateThread(NULL, 0, CUpdateCheck, niData, 0, NULL);
             }
             break;
@@ -488,20 +541,28 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             mon->Stop();
             fan_conf->Save();
             break;
+        case PBT_APMPOWERSTATUSCHANGE:
+            // ac/batt change
+            SetPowerState();
+            mon->SetCurrentMode();
+            ComboBox_SetCurSel(power_list, mon->powerMode);
+            break;
         }
         break;
     case WM_TIMER:
         //DebugPrint("Fans UI update...\n");
-        for (int i = 0; i < mon->sensorSize; i++) {
-            string name = to_string(mon->senValues[mon->acpi->sensors[i].sid]) + " (" + to_string(mon->maxTemps[mon->acpi->sensors[i].sid]) + ")";
-            ListView_SetItemText(tempList, i, 0, (LPSTR)name.c_str());
-            name = fan_conf->GetSensorName(&mon->acpi->sensors[i]);
-            ListView_SetItemText(tempList, i, 1, (LPSTR)name.c_str());
+        if (mon->modified) {
+            for (int i = 0; i < mon->sensorSize; i++) {
+                string name = to_string(mon->senValues[mon->acpi->sensors[i].sid]) + " (" + to_string(mon->maxTemps[mon->acpi->sensors[i].sid]) + ")";
+                ListView_SetItemText(tempList, i, 0, (LPSTR)name.c_str());
+                name = fan_conf->GetSensorName(&mon->acpi->sensors[i]);
+                ListView_SetItemText(tempList, i, 1, (LPSTR)name.c_str());
+            }
+            RECT cArea;
+            GetClientRect(tempList, &cArea);
+            ListView_SetColumnWidth(tempList, 0, LVSCW_AUTOSIZE);
+            ListView_SetColumnWidth(tempList, 1, cArea.right - ListView_GetColumnWidth(tempList, 0));
         }
-        RECT cArea;
-        GetClientRect(tempList, &cArea);
-        ListView_SetColumnWidth(tempList, 0, LVSCW_AUTOSIZE);
-        ListView_SetColumnWidth(tempList, 1, cArea.right - ListView_GetColumnWidth(tempList, 0));
         for (int i = 0; i < mon->fansize; i++) {
             string name = GetFanName(i);
             ListView_SetItemText(fanList, i, 0, (LPSTR)name.c_str());
@@ -511,40 +572,4 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
     default: return false;
     }
     return true;
-}
-
-// Message handler for about box.
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    UNREFERENCED_PARAMETER(lParam);
-    switch (message)
-    {
-    case WM_INITDIALOG: {
-        SetDlgItemText(hDlg, IDC_STATIC_VERSION, ("Version: " + GetAppVersion()).c_str());
-        return (INT_PTR)TRUE;
-    } break;
-    case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case IDOK: case IDCANCEL:
-        {
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR)TRUE;
-        } break;
-        }
-        break;
-    case WM_NOTIFY:
-        switch (LOWORD(wParam)) {
-        case IDC_SYSLINK_HOMEPAGE:
-            switch (((LPNMHDR)lParam)->code)
-            {
-            case NM_CLICK:
-            case NM_RETURN:
-            {
-                ShellExecute(NULL, "open", "https://github.com/T-Troll/alienfx-tools", NULL, NULL, SW_SHOWNORMAL);
-            } break;
-            } break;
-        }
-        break;
-    }
-    return (INT_PTR)FALSE;
 }

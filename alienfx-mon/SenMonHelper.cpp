@@ -76,7 +76,7 @@ void SenMonHelper::ModifyMon()
 	if (conf->bSensors) {
 		if (!acpi) {
 			acpi = new AlienFan_SDK::Control();
-			if (!(conf->bSensors = acpi->Probe())) {
+			if (!(conf->bSensors = acpi->Probe(true))) {
 				delete acpi;
 				acpi = NULL;
 			}
@@ -127,7 +127,7 @@ string SenMonHelper::GetFanName(int index) {
 	{
 	case 1: fname = "CPU"; break;
 	case 6: fname = "GPU"; break;
-	default: fname = "";
+	//default: fname = "";
 	}
 	return fname + " Fan " + to_string(index + 1);
 }

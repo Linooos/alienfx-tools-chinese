@@ -8,53 +8,48 @@ using namespace std;
 #pragma comment(lib,"Version.lib")
 
 extern HWND mDlg;
+extern HMODULE hInst;
 extern bool needUpdateFeedback, isNewVersion;
+extern int idc_version, idc_homepage;
 
-//int versionTag, linkControl;
-//
-//INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-//{
-//	UNREFERENCED_PARAMETER(lParam);
-//	switch (message)
-//	{
-//	case WM_INITDIALOG: {
-//		SetDlgItemText(hDlg, versionTag, ("Version: " + GetAppVersion()).c_str());
-//	} break;
-//	case WM_COMMAND:
-//		switch (LOWORD(wParam)) {
-//		case IDOK: case IDCANCEL:
-//		{
-//			EndDialog(hDlg, LOWORD(wParam));
-//		} break;
-//		}
-//		break;
-//	case WM_NOTIFY:
-//		if (LOWORD(wParam) == linkControl) {
-//			switch (((LPNMHDR)lParam)->code)
-//			{
-//			case NM_CLICK:
-//			case NM_RETURN:
-//			{
-//				ShellExecute(NULL, "open", "https://github.com/T-Troll/alienfx-tools", NULL, NULL, SW_SHOWNORMAL);
-//			} break;
-//			} break;
-//		}
-//		break;
-//	default: return (INT_PTR)FALSE;
-//	}
-//	return (INT_PTR)TRUE;
-//}
-//
-//void OpenAbout(int res, int vt, int link) {
-//	versionTag = vt; linkControl = link;
-//	DialogBox(GetModuleHandle(NULL), MAKEINTRESOURCE(res), mDlg, About);
-//}
+INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	UNREFERENCED_PARAMETER(lParam);
+	switch (message)
+	{
+	case WM_INITDIALOG: {
+		SetDlgItemText(hDlg, idc_version, ("Version: " + GetAppVersion()).c_str());
+	} break;
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK: case IDCANCEL:
+		{
+			EndDialog(hDlg, LOWORD(wParam));
+		} break;
+		}
+		break;
+	case WM_NOTIFY:
+		if (LOWORD(wParam) == idc_homepage) {
+			switch (((LPNMHDR)lParam)->code)
+			{
+			case NM_CLICK:
+			case NM_RETURN:
+			{
+				ShellExecute(NULL, "open", "https://github.com/T-Troll/alienfx-tools", NULL, NULL, SW_SHOWNORMAL);
+			} break;
+			} break;
+		}
+		break;
+	default: return (INT_PTR)FALSE;
+	}
+	return (INT_PTR)TRUE;
+}
 
 DWORD WINAPI Blinker(LPVOID lparam) {
-	int howmany = (int)(ULONGLONG)lparam << 1;
+	int howmany = ((int)(ULONGLONG)lparam << 1) + 2;
 	for (int i = 0; i < howmany; i++) {
-		keybd_event(VK_CAPITAL, 0x45, KEYEVENTF_EXTENDEDKEY | 0, 0);
-		keybd_event(VK_CAPITAL, 0x45, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+		keybd_event(VK_CAPITAL, 0, 0, 0);
+		keybd_event(VK_CAPITAL, 0/*x45*/, KEYEVENTF_KEYUP, 0);
 		Sleep(300);
 	}
 	return 0;
@@ -62,6 +57,10 @@ DWORD WINAPI Blinker(LPVOID lparam) {
 
 void BlinkNumLock(int howmany) {
 	CreateThread(NULL, 0, Blinker, (LPVOID)(ULONGLONG)howmany, 0, NULL);
+}
+
+bool WarningBox(HWND hDlg, const char* msg) {
+	return GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, msg, "Warning", MB_YESNO | MB_ICONWARNING) == IDYES;
 }
 
 bool EvaluteToAdmin(HWND dlg) {
@@ -83,16 +82,29 @@ bool EvaluteToAdmin(HWND dlg) {
 	return true;
 }
 
-bool DoStopService(bool flag, bool kind) {
+bool TryStopService(SC_HANDLE handle, bool kind, const char* name) {
+	bool rCode = false;
+	SC_HANDLE schService = OpenService(handle, name, SERVICE_START | SERVICE_STOP);
+	if (schService) {
+		SERVICE_STATUS  serviceStatus;
+		rCode = kind ? ControlService(schService, SERVICE_CONTROL_STOP, &serviceStatus) :
+			StartService(schService, 0, NULL);
+		CloseServiceHandle(schService);
+	}
+	return rCode;
+}
+
+bool DoStopAWCC(bool flag, bool kind) {
 	bool rCode = false;
 	if (flag && EvaluteToAdmin()) {
 		SC_HANDLE schSCManager = OpenSCManager(NULL, NULL, GENERIC_READ);
-		SC_HANDLE schService = schSCManager ? OpenService(schSCManager, "AWCCService", SERVICE_ALL_ACCESS) : NULL;
-		SERVICE_STATUS  serviceStatus;
-		if (schSCManager && schService) {
-			rCode = kind ? ControlService(schService, SERVICE_CONTROL_STOP, &serviceStatus) :
-				StartService(schService, 0, NULL);
-			CloseServiceHandle(schService);
+		if (schSCManager) {
+			if (!(rCode = TryStopService(schSCManager, kind, "AWCCService"))) {
+				if (TryStopService(schSCManager, kind, "DellClientManagementService")) {
+					rCode = TryStopService(schSCManager, kind, "DellTechHub");
+				}
+			}
+			CloseServiceHandle(schSCManager);
 		}
 	}
 	return rCode;
@@ -149,7 +161,7 @@ DWORD WINAPI CUpdateCheck(LPVOID lparam) {
 							ndots++;
 					while (ndots++ < 3)
 						res += ".0";
-					if (res.compare(GetAppVersion()) > 0) {
+					if (res.compare(GetAppVersion(false)) > 0) {
 						// new version detected!
 						ShowNotification(niData, "原版更新可获取", "更新版本：" + res);
 						isNewVersion = true;
@@ -165,6 +177,7 @@ DWORD WINAPI CUpdateCheck(LPVOID lparam) {
 	if (needUpdateFeedback && !req)
 			ShowNotification(niData, "更新错误", "无法链接到GitHub");
 	delete[] buf;
+	needUpdateFeedback = false;
 	return 0;
 }
 
@@ -182,38 +195,37 @@ bool WindowsStartSet(bool kind, string name) {
 	}
 }
 
-string GetAppVersion() {
-
-	HMODULE hInst = GetModuleHandle(NULL);
-
-	HRSRC hResInfo = FindResource(hInst, MAKEINTRESOURCE(VS_VERSION_INFO), RT_VERSION);
-
+string GetAppVersion(bool isFile) {
 	string res;
 
-	if (hResInfo) {
-		DWORD dwSize = SizeofResource(hInst, hResInfo);
-		HGLOBAL hResData = LoadResource(hInst, hResInfo);
-		if (hResData) {
-			LPVOID pRes = LockResource(hResData),
-				pResCopy = LocalAlloc(LMEM_FIXED, dwSize);
-			if (pResCopy) {
-				UINT uLen = 0;
-				VS_FIXEDFILEINFO* lpFfi = NULL;
+	//HMODULE hInst = GetModuleHandle(NULL);
+	HGLOBAL hResData = LoadResource(hInst, FindResource(hInst, MAKEINTRESOURCE(VS_VERSION_INFO), RT_VERSION));
 
-				CopyMemory(pResCopy, pRes, dwSize);
+	if (hResData) {
+		LPVOID pRes = LockResource(hResData);
+		UINT uLen = 0;
+		DWORD MS, LS;
+		VS_FIXEDFILEINFO* lpFfi = NULL;
 
-				VerQueryValue(pResCopy, TEXT("\\"), (LPVOID*)&lpFfi, &uLen);
+		VerQueryValue(pRes/*Copy*/, TEXT("\\"), (LPVOID*)&lpFfi, &uLen);
 
-				res = to_string(HIWORD(lpFfi->dwProductVersionMS)) + "."
-					+ to_string(LOWORD(lpFfi->dwProductVersionMS)) + "."
-					+ to_string(HIWORD(lpFfi->dwProductVersionLS)) + "."
-					+ to_string(LOWORD(lpFfi->dwProductVersionLS));
-
-				LocalFree(pResCopy);
-			}
-			FreeResource(hResData);
+		if (isFile) {
+			MS = lpFfi->dwFileVersionMS;
+			LS = lpFfi->dwFileVersionLS;
 		}
+		else {
+			MS = lpFfi->dwProductVersionMS;
+			LS = lpFfi->dwProductVersionLS;
+		}
+
+		res = to_string(HIWORD(MS)) + "."
+			+ to_string(LOWORD(MS)) + "."
+			+ to_string(HIWORD(LS)) + "."
+			+ to_string(LOWORD(LS));
+
+		FreeResource(hResData);
 	}
+
 	return res;
 }
 
@@ -224,7 +236,7 @@ HWND CreateToolTip(HWND hwndParent, HWND oldTip)
 
 	HWND hwndTT = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
 		WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
-		0, 0, 0, 0, hwndParent, NULL, GetModuleHandle(NULL), NULL);
+		0, 0, 0, 0, hwndParent, NULL, hInst, NULL);
 	TOOLINFO ti{ sizeof(TOOLINFO), TTF_SUBCLASS, hwndParent };
 	GetClientRect(hwndParent, &ti.rect);
 	SendMessage(hwndTT, TTM_ADDTOOL, 0, (LPARAM)(LPTOOLINFO)&ti);
@@ -244,15 +256,31 @@ void SetSlider(HWND tt, int value) {
 	SetToolTip(tt, to_string(value));
 }
 
-void UpdateCombo(HWND ctrl, vector<string> items, int sel, vector<int> val) {
+void UpdateCombo(HWND ctrl, const char* items[], int sel, const int val[]) {
 	ComboBox_ResetContent(ctrl);
-	for (int i = 0; i < items.size(); i++) {
+	for (int i = 0; items[i][0]; i++) {
+		ComboBox_AddString(ctrl, items[i]);
+		if (val) {
+			ComboBox_SetItemData(ctrl, i, val[i]);
+			if (sel == val[i])
+				ComboBox_SetCurSel(ctrl, i);
+		}
+		else
+			if (sel == i)
+				ComboBox_SetCurSel(ctrl, sel);
+	}
+}
+
+void UpdateCombo(HWND ctrl, const string* items, int sel, vector<int> val) {
+	ComboBox_ResetContent(ctrl);
+	for (int i = 0; items[i].size(); i++) {
 		ComboBox_AddString(ctrl, items[i].c_str());
 		if (val.size()) {
 			ComboBox_SetItemData(ctrl, i, val[i]);
 			if (sel == val[i])
 				ComboBox_SetCurSel(ctrl, i);
-		} else
+		}
+		else
 			if (sel == i)
 				ComboBox_SetCurSel(ctrl, sel);
 	}

@@ -4,7 +4,7 @@
 #include <random>
 #include "AlienFX_SDK.h"
 #include "resource.h"
-#include <ThreadHelper.h>
+#include <CustomMutex.h>
 #include <map>
 
 // Profile flags
@@ -60,7 +60,6 @@ struct zonelight {
 };
 
 struct zonemap {
-	//DWORD gID;
 	byte gridID;
 	byte xMax = 0, yMax = 0,
 		scaleX = 1, scaleY = 1,
@@ -82,6 +81,7 @@ struct grideffect {
 	byte numclr = 0;
 	byte width = 1;
 	WORD flags;
+	void* capt = NULL;
 	vector<AlienFX_SDK::Afx_colorcode> effectColors;
 };
 
@@ -94,7 +94,6 @@ struct starmap {
 struct grideffop {
 	// operational info
 	bool passive = true;
-	//void* capt = NULL; // capture object if present in operation
 	int gridX, gridY,
 		oldphase,
 		size,
@@ -118,7 +117,6 @@ struct groupset {
 };
 
 struct deviceeffect {
-	WORD vid, pid;
 	AlienFX_SDK::Afx_colorcode effColor1, effColor2;
 	byte globalEffect=0, globalDelay=5, globalMode = 1, colorMode = 1;
 	DWORD reserved;
@@ -144,8 +142,9 @@ struct profile {
 	vector<string> triggerapp;
 	vector<groupset> lightsets;
 	void *fansets = NULL;
-	vector<deviceeffect> effects;
+	map<DWORD, vector<deviceeffect>> effects;
 	string script = "";
+	DWORD freqMode = 0;
 };
 
 union ambgrid {
@@ -158,14 +157,12 @@ union ambgrid {
 class ConfigHandler
 {
 private:
-	HKEY hKeyMain = NULL, hKeyZones = NULL, hKeyProfiles = NULL;
+	HKEY hKeyMain = NULL, hKeyZones = NULL, hKeyProfiles = NULL, hKeyAccent = NULL;
 	void GetReg(char *, DWORD *, DWORD def = 0);
 	void SetReg(char *text, DWORD value);
-	//DWORD GetRegData(HKEY key, int vindex, char* name, byte** data);
 	groupset* FindCreateGroupSet(int profID, int groupID);
 	profile* FindCreateProfile(unsigned id);
 	uniform_int_distribution<WORD> rclr = uniform_int_distribution<WORD>(0x20, 0xff);
-	CustomMutex zoneUpdate;
 public:
 	DWORD startWindows;
 	DWORD startMinimized;
@@ -192,17 +189,26 @@ public:
 	DWORD dimmedBatt;
 	DWORD effectsOnBattery;
 	DWORD fansOnBattery;
+	DWORD actionLights;
+	DWORD actionTimeout;
 
-	COLORREF customColors[16]{ 0 };
+	DWORD accentColor;
+
+	COLORREF customColors[16];
 
 	// States
 	bool stateDimmed = false,
-		 stateOn = true,
-		 stateEffects = true,
-		 statePower = true,
-		 wasAWCC = false;
+		stateOn = true,
+		stateEffects = true,
+		statePower = true;/*,
+		 wasAWCC = false;*/
+
+	// Freqs for monitor
+	DWORD dcFreq;
+
 	AlienFX_SDK::Afx_colorcode testColor{0,255};
 	CustomMutex modifyProfile;
+	CustomMutex zoneUpdate;
 
 	// Ambient...
 	DWORD amb_mode;
@@ -236,13 +242,15 @@ public:
 	bool SamePower(profile* cur, profile* prof = NULL);
 	void Save();
 	groupset* FindMapping(int mid, vector<groupset>* set = NULL);
+	bool IsLightInGroup(DWORD lgh, AlienFX_SDK::Afx_group* grp);
 	void SetRandomColor(AlienFX_SDK::Afx_colorcode* clr);
+	void RemoveUnusedGroups();
 	zonemap* FindZoneMap(int gid, bool reset=false);
 	profile* FindProfile(int id);
 	profile* FindDefaultProfile();
 	profile* FindProfileByApp(std::string appName, bool active = false);
 	AlienFX_SDK::Afx_group* FindCreateGroup(int groupID);
 	bool IsPriorityProfile(profile* prof);
-	//bool IsActiveOnly(profile* prof);
-	void SetIconState();
+	bool SetIconState(bool needCheck = false);
+	DWORD GetAccentColor();
 };

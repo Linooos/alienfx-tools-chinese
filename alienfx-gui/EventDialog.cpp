@@ -5,8 +5,9 @@
 #include "common.h"
 
 extern bool SetColor(HWND ctrl, AlienFX_SDK::Afx_action* map, bool update = true);
-extern AlienFX_SDK::Afx_colorcode Act2Code(AlienFX_SDK::Afx_action*);
-extern void RedrawButton(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
+DWORD MakeRGB(AlienFX_SDK::Afx_action* act);
+//extern AlienFX_SDK::Afx_colorcode Act2Code(AlienFX_SDK::Afx_action*);
+extern void RedrawButton(HWND hDlg, DWORD);
 extern void UpdateZoneAndGrid();
 extern void UpdateZoneList();
 
@@ -16,12 +17,11 @@ extern EventHandler* eve;
 
 event* ev = NULL;
 
-const static vector<string> eventTypeNames{ "Performance", "Indicator" };
-const static vector<vector<string>> eventNames{
-		{ "CPU负载", "内存负载", "硬盘负载", "显卡负载", "网络", "温度", "电池",
-			"风扇转速", "功耗", "电源模式"},
-		{ "Storage activity", "Network activity", "System overheat", "Out of memory", "Low battery", "Selected language",
-			"BIOS Power mode", "Power source" }};
+const char* eventTypeNames[] = { "性能参数", "状态参数" };
+const char* eventNamesP[] = { "CPU负载", "内存负载", "硬盘负载", "显卡负载", "网络", "温度", "电池",
+			"风扇转速", "功耗", "电源模式", ""},
+			*eventNamesI[] = { "硬盘活动", "网络活动", "系统过热", "内存满载", "低电量", "选择语言",
+				"BIOS供电模式", "电源", ""};
 
 int eventID = 0;
 
@@ -30,14 +30,14 @@ void SetEventData(HWND hDlg) {
 		CheckDlgButton(hDlg, IDC_STATUS_BLINK, ev->mode ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_RADIO_PERF, ev->state == MON_TYPE_PERF ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_RADIO_IND, ev->state == MON_TYPE_IND ? BST_CHECKED : BST_UNCHECKED);
-		UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), eventNames[ev->state-1], ev->source);
+		UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), ev->state < 2 ? eventNamesP : eventNamesI, ev->source);
 		SendMessage(GetDlgItem(hDlg, IDC_CUTLEVEL), TBM_SETPOS, true, ev->cut);
 		SetSlider(sTip2, ev->cut);
 	}
 	else {
 		CheckDlgButton(hDlg, IDC_RADIO_PERF, BST_CHECKED);
 		CheckDlgButton(hDlg, IDC_RADIO_IND, BST_UNCHECKED);
-		UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), eventNames[0], 0);
+		UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), eventNamesP, 0);
 	}
 
 	RedrawWindow(GetDlgItem(hDlg, IDC_BUTTON_COLORFROM), NULL, NULL, RDW_INVALIDATE);
@@ -50,7 +50,7 @@ void RebuildEventList(HWND hDlg) {
 	ListView_DeleteAllItems(eff_list);
 	ListView_SetExtendedListViewStyle(eff_list, LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
 
-	HIMAGELIST hOld = ListView_GetImageList(eff_list, LVSIL_SMALL);
+	//HIMAGELIST hOld = ListView_GetImageList(eff_list, LVSIL_SMALL);
 
 	if (!ListView_GetColumnWidth(eff_list, 0)) {
 		LVCOLUMNA lCol{ LVCF_FMT, LVCFMT_LEFT };
@@ -58,26 +58,30 @@ void RebuildEventList(HWND hDlg) {
 		ListView_SetColumnWidth(eff_list, 0, LVSCW_AUTOSIZE_USEHEADER);
 	}
 	ev = NULL;
+	LVITEMA lItem{ LVIF_TEXT | LVIF_STATE };
 	if (mmap) {
 		for (int i = 0; i < mmap->events.size(); i++) {
 			if (!mmap->events[i].state)
 				mmap->events[i].state = 2;
 			int type = mmap->events[i].state - 1;
-			LVITEMA lItem{ LVIF_TEXT | LVIF_STATE };
-			string itemName = eventTypeNames[type] + ", " +
-				eventNames[type][mmap->events[i].source];
+			string itemName = string(eventTypeNames[type]) + ", " +
+				(type ? eventNamesI[mmap->events[i].source] : eventNamesP[mmap->events[i].source]);
+				//eventNames[type][mmap->events[i].source];
 			lItem.iItem = i;
 			lItem.pszText = (LPSTR) itemName.c_str();
+			lItem.state = i == eventID ? LVIS_SELECTED | LVIS_FOCUSED : 0;
 			// check selection...
-			if (i == eventID) {
-				lItem.state = LVIS_SELECTED | LVIS_FOCUSED;
-			}
+			//if (i == eventID) {
+			//	lItem.state = LVIS_SELECTED | LVIS_FOCUSED;
+			//}
 			ListView_InsertItem(eff_list, &lItem);
 		}
 	}
 	CheckDlgButton(hDlg, IDC_CHECK_NOEVENT, mmap && mmap->fromColor ? BST_CHECKED : BST_UNCHECKED);
-	SetEventData(hDlg);
+	//SetEventData(hDlg);
 	ListView_EnsureVisible(eff_list, eventID, false);
+	//UpdateZoneAndGrid();
+	//fxhl->RefreshCounters();
 }
 
 BOOL CALLBACK TabEventsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
@@ -93,114 +97,111 @@ BOOL CALLBACK TabEventsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 		SendMessage(s2_slider, TBM_SETTICFREQ, 10, 0);
 		sTip2 = CreateToolTip(s2_slider, sTip2);
 		// Start UI update thread...
-		SetTimer(hDlg, 0, 300, NULL);
+		SetTimer(hDlg, 0, 500, NULL);
 	} break;
 	case WM_APP + 2: {
 		if (mmap && !(eventID < mmap->events.size()))
 			eventID = 0;
 		RebuildEventList(hDlg);
+		SetEventData(hDlg);
 	} break;
 	case WM_COMMAND: {
-		bool state = IsDlgButtonChecked(hDlg, LOWORD(wParam)) == BST_CHECKED;
 		switch (LOWORD(wParam))
 		{
 		case IDC_CHECK_NOEVENT:
 			if (mmap) {
-				mmap->fromColor = state;
+				mmap->fromColor = IsDlgButtonChecked(hDlg, IDC_CHECK_NOEVENT) == BST_CHECKED;
+				UpdateZoneAndGrid();
 			}
-			//else
-			//	CheckDlgButton(hDlg, LOWORD(wParam), BST_UNCHECKED);
-			RebuildEventList(hDlg);
-			UpdateZoneAndGrid();
-			fxhl->RefreshCounters();
 			break;
 		case IDC_STATUS_BLINK:
 			if (ev)
-				ev->mode = state;
-			//else
-			//	CheckDlgButton(hDlg, LOWORD(wParam), BST_UNCHECKED);
+				ev->mode = IsDlgButtonChecked(hDlg, IDC_STATUS_BLINK) == BST_CHECKED;
 			break;
 		case IDC_BUTTON_COLORFROM:
 			if (mmap && ev && (!mmap->fromColor || mmap->color.size())) {
 				SetColor(GetDlgItem(hDlg, IDC_BUTTON_COLORFROM), &ev->from);
-				RebuildEventList(hDlg);
 				UpdateZoneAndGrid();
-				fxhl->RefreshCounters();
 			}
 			break;
 		case IDC_BUTTON_COLORTO:
 			if (ev) {
 				SetColor(GetDlgItem(hDlg, IDC_BUTTON_COLORTO), &ev->to);
+				UpdateZoneAndGrid();
 			}
 			break;
 		case IDC_EVENT_SOURCE:
 			if (ev && HIWORD(wParam) == CBN_SELCHANGE) {
 				ev->source = ComboBox_GetCurSel(GetDlgItem(hDlg, IDC_EVENT_SOURCE));
 				RebuildEventList(hDlg);
-				fxhl->RefreshCounters();
 			}
 			break;
 		case IDC_RADIO_PERF: case IDC_RADIO_IND: {
 			int ctype = LOWORD(wParam) == IDC_RADIO_IND;
-			UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), eventNames[ctype], 0);
+			UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), ctype ? eventNamesI : eventNamesP, 0);
 			if (ev) {
 				ev->state = ctype + 1;
 				ev->source = 0;
 				RebuildEventList(hDlg);
-				fxhl->RefreshCounters();
 			}
 		} break;
 		case IDC_BUT_ADD_EVENT:
 			if (mmap) {
+				conf->modifyProfile.lockWrite();
 				mmap->events.push_back({ (byte)(IsDlgButtonChecked(hDlg, IDC_RADIO_PERF) == BST_CHECKED ? 1 : 2),
-					(byte)ComboBox_GetCurSel(GetDlgItem(hDlg, IDC_EVENT_SOURCE)) });
+					(byte)ComboBox_GetCurSel(GetDlgItem(hDlg, IDC_EVENT_SOURCE)),
+					(byte)SendMessage(GetDlgItem(hDlg, IDC_CUTLEVEL), TBM_GETPOS, 0, 0),
+					(byte)IsDlgButtonChecked(hDlg, IDC_STATUS_BLINK) == BST_CHECKED	});
 				eventID = (int)mmap->events.size() - 1;
+				conf->modifyProfile.unlockWrite();
 				eve->ChangeEffects();
 				RebuildEventList(hDlg);
 				UpdateZoneAndGrid();
-				fxhl->RefreshCounters();
 			}
 			break;
 		case IDC_BUTT_REMOVE_EVENT:
 			if (mmap && ev) {
+				conf->modifyProfile.lockWrite();
 				mmap->events.erase(mmap->events.begin() + eventID);
+				conf->modifyProfile.unlockWrite();
 				if (eventID)
 					eventID--;
 				eve->ChangeEffects();
 				RebuildEventList(hDlg);
 				UpdateZoneAndGrid();
-				fxhl->RefreshCounters();
 			}
 			break;
 		case IDC_BUTT_EVENT_UP:
 			if (mmap && ev && eventID) {
 				eventID--;
+				conf->modifyProfile.lockWrite();
 				swap(*ev, mmap->events[eventID]);
+				conf->modifyProfile.unlockWrite();
 				RebuildEventList(hDlg);
 				UpdateZoneAndGrid();
-				fxhl->RefreshCounters();
 			}
 			break;
 		case IDC_BUT_EVENT_DOWN:
 			if (mmap && ev && eventID < mmap->events.size() - 1) {
 				eventID++;
+				conf->modifyProfile.lockWrite();
 				swap(*ev, mmap->events[eventID]);
+				conf->modifyProfile.unlockWrite();
 				RebuildEventList(hDlg);
 				UpdateZoneAndGrid();
-				fxhl->RefreshCounters();
 			}
 			break;
 		}
 	} break;
 	case WM_DRAWITEM: {
-		AlienFX_SDK::Afx_colorcode* c = NULL;
+		DWORD c = 0xff000000;
 		if (mmap && ev) {
 			switch (((DRAWITEMSTRUCT*)lParam)->CtlID) {
 			case IDC_BUTTON_COLORFROM:
-				c = &Act2Code(mmap->fromColor && mmap->color.size() ? &mmap->color[0] : &ev->from);
+				c = MakeRGB(mmap->fromColor && mmap->color.size() ? &mmap->color.front() : &ev->from);
 				break;
 			case IDC_BUTTON_COLORTO:
-				c = &Act2Code(&ev->to);
+				c = MakeRGB(&ev->to);
 				break;
 			}
 		}
@@ -216,44 +217,39 @@ BOOL CALLBACK TabEventsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			break;
 		} break;
 	case WM_NOTIFY:
-		switch (((NMHDR*)lParam)->idFrom) {
-		case IDC_EVENTS_LIST:
-			switch (((NMHDR*)lParam)->code) {
-			case LVN_ITEMCHANGED:
-			{
-				NMLISTVIEW* lPoint = (LPNMLISTVIEW)lParam;
-				if (mmap && lPoint->uNewState & LVIS_FOCUSED && lPoint->iItem >= 0) {
-					// Select other item...
-					eventID = lPoint->iItem;
-					ev = &mmap->events[eventID];
-				}
-				else {
-					ev = NULL; eventID = 0;
-				}
-				SetEventData(hDlg);
-			} break;
+		if (((NMHDR*)lParam)->code == LVN_ITEMCHANGED) {
+			NMLISTVIEW* lPoint = (LPNMLISTVIEW)lParam;
+			if (mmap && lPoint->uNewState & LVIS_FOCUSED /*&& lPoint->iItem >= 0*/) {
+				// Select other item...
+				eventID = lPoint->iItem;
+				ev = &mmap->events[eventID];
 			}
-			break;
+			else {
+				ev = NULL; eventID = 0;
+			}
+			SetEventData(hDlg);
 		}
 		break;
-	case WM_TIMER:
+	case WM_TIMER: {
 		//DebugPrint("Events UI update...\n");
-		SetDlgItemText(hDlg, IDC_VAL_CPU, (to_string(fxhl->eData.CPU) + " (" + to_string(fxhl->maxData.CPU) + ")%").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_RAM, (to_string(fxhl->eData.RAM) + " (" + to_string(fxhl->maxData.RAM) + ")%").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_GPU, (to_string(fxhl->eData.GPU) + " (" + to_string(fxhl->maxData.GPU) + ")%").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_PWR, (to_string(fxhl->eData.PWR * fxhl->maxData.PWR / 100) + " (" + to_string(fxhl->maxData.PWR) + ")W").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_BAT, (to_string(fxhl->eData.Batt) + " %").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_NET, (to_string(fxhl->eData.NET) + " %").c_str());
-		SetDlgItemText(hDlg, IDC_VAL_TEMP, (to_string(fxhl->eData.Temp) + " (" + to_string(fxhl->maxData.Temp) + ")C").c_str());
+		int maxFans = 0;
 		if (mon) {
-			int maxFans = 0;
-			for (auto i = mon->fanRpm.begin(); i != mon->fanRpm.end(); i++)
-				maxFans = max(maxFans, i->second);
-			SetDlgItemText(hDlg, IDC_VAL_FAN, (to_string(maxFans) + " RPM (" + to_string(fxhl->eData.Fan) + "%)").c_str());
+			for (int i = 0; i < mon->fansize; i++)
+				maxFans = max(maxFans, mon->fanRpm[i]);
 		}
-		else
-			SetDlgItemText(hDlg, IDC_VAL_FAN, "disabled");
-		break;
+		//LightEventData* eData = &fxhl->eData, *maxData = &fxhl->maxData;
+#define eData fxhl->eData
+#define maxData fxhl->maxData
+		string usage = to_string(eData.CPU) + " (" + to_string(maxData.CPU) + ")%\n" +
+			to_string(eData.RAM) + " (" + to_string(maxData.RAM) + ")%\n" +
+			to_string(eData.GPU) + " (" + to_string(maxData.GPU) + ")%\n" +
+			to_string(eData.Temp) + " (" + to_string(maxData.Temp) + ")C\n" +
+			to_string(eData.Batt) + " %\n" +
+			to_string(eData.PWR * maxData.PWR / 100) + " (" + to_string(maxData.PWR) + ")W\n" +
+			to_string(maxFans) + " RPM (" + to_string(eData.Fan) + "%)\n" +
+			to_string(eData.NET) /*+ " (" + to_string(maxData.NET)*/ + " %";
+		SetDlgItemText(hDlg, IDC_VAL_USAGE, usage.c_str());
+	} break;
 	default: return false;
 	}
 	return true;

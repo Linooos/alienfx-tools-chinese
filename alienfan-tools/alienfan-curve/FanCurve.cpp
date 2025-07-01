@@ -100,7 +100,7 @@ void DrawFan()
                         SetDCBrushColor(hdc, RGB(0, 255, 0));
                     }
                     else {
-                        linePen = CreatePen(PS_DOT, 1, RGB(255, 255, 0));
+                        linePen = CreatePen(PS_DOT, 0, RGB(255, 255, 0));
                         SetDCBrushColor(hdc, RGB(255, 255, 0));
                     }
                     SelectObject(hdc, linePen);
@@ -112,18 +112,32 @@ void DrawFan()
                         Ellipse(hdc, mark.x - 2, mark.y - 2, mark.x + 2, mark.y + 2);
                     }
                     // Dots
-                    if (mon->lastBoost[fan_conf->lastSelectedFan] == senI->first) {
-                        SetDCPenColor(hdc, RGB(255, 0, 0));
-                        SetDCBrushColor(hdc, RGB(255, 0, 0));
-                        SelectObject(hdc, GetStockObject(DC_PEN));
+                    if (!mon->powerMode) {
+                        if (mon->lastBoost[fan_conf->lastSelectedFan] == senI->first) {
+                            SetDCPenColor(hdc, RGB(255, 0, 0));
+                            SetDCBrushColor(hdc, RGB(255, 0, 0));
+                            SelectObject(hdc, GetStockObject(DC_PEN));
+                        }
+                        mark = Fan2Screen(mon->senValues[senI->first], mon->senBoosts[fan_conf->lastSelectedFan][senI->first]);
+                        Ellipse(hdc, mark.x - 4, mark.y - 4, mark.x + 4, mark.y + 4);
+                        DeleteObject(linePen);
                     }
-                    mark = Fan2Screen(mon->senValues[senI->first], mon->senBoosts[fan_conf->lastSelectedFan][senI->first]);
-                    Ellipse(hdc, mark.x - 4, mark.y - 4, mark.x + 4, mark.y + 4);
-                    DeleteObject(linePen);
                 }
             }
+            // Fan dots, experimental
+            linePen = CreatePen(PS_SOLID, 2, RGB(0, 0, 255));
+            SelectObject(hdc, linePen);
+            for (int i = 0; i < mon->fansize; i++) {
+                SetDCBrushColor(hdc, i == fan_conf->lastSelectedFan ? RGB(0, 255, 0) : RGB(255, 255, 0));
+                byte fanType = mon->acpi->fans[i].type;
+                mark = Fan2Screen(fanType == 255 ? 50 :
+                    mon->senValues[fanType | 0x100],
+                    mon->GetFanPercent(i));
+                Ellipse(hdc, mark.x - 4, mark.y - 4, mark.x + 4, mark.y + 4);
+            }
+            DeleteObject(linePen);
             SetWindowText(tipWindow, ("Fan curve (scale " + to_string(fan_conf->GetFanScale(fan_conf->lastSelectedFan))
-                + ", boost " + to_string(mon->boostRaw[fan_conf->lastSelectedFan]) + /*" (" + to_string(mon->acpi->GetFanBoost(fan_conf->lastSelectedFan)) + ")" +*/ ", " +
+                + ", boost " + /*to_string(mon->boostRaw[fan_conf->lastSelectedFan]) + " (" + */to_string(mon->acpi->GetFanBoost(fan_conf->lastSelectedFan))/* + ")"*/ + ", " +
                 to_string(mon->GetFanPercent(fan_conf->lastSelectedFan)) + "%)").c_str());
         }
         else {
@@ -168,9 +182,9 @@ int SetFanSteady(byte fanID, byte boost, bool downtrend = false) {
     int pRpm, bRpm = mon->acpi->GetFanRPM(fanID), maxRPM;
     boostCheck.push_back({ boost, (USHORT)bRpm });
     lastBoostPoint = &boostCheck.back();
-    if (WaitForSingleObject(ocStopEvent, 3000) != WAIT_TIMEOUT)
-        return -1;
-    lastBoostPoint->maxRPM = mon->acpi->GetFanRPM(fanID);
+    //if (WaitForSingleObject(ocStopEvent, 3000) != WAIT_TIMEOUT)
+    //    return -1;
+    //lastBoostPoint->maxRPM = bRpm;// mon->acpi->GetFanRPM(fanID);
     do {
         pRpm = bRpm;
         bRpm = lastBoostPoint->maxRPM;
@@ -187,10 +201,11 @@ int SetFanSteady(byte fanID, byte boost, bool downtrend = false) {
 DWORD WINAPI CheckFanOverboost(LPVOID lpParam) {
     mon->inControl = false;
     SendMessage((HWND)lpParam, WM_APP + 2, 0, 0);
+    mon->ResetBoost(); // for manual mode before check
     mon->SetCurrentMode(0);
     int rpm = mon->acpi->GetMaxRPM(fan_conf->lastSelectedFan), cSteps = 8, boost = 100, downScale;
     boostCheck.clear();
-    bestBoostPoint = { (byte)boost, (unsigned short)rpm };
+    bestBoostPoint = { 100, (unsigned short)rpm };
     boostScale = 10;
     fanMaxScale = 500;
     fanMinScale = (rpm / 100) * 100;
@@ -212,7 +227,7 @@ DWORD WINAPI CheckFanOverboost(LPVOID lpParam) {
     for (int steps = cSteps; crpm >= 0 && steps; steps = steps >> 1) {
         // Check for uptrend
         boost -= steps;
-        while (boost > 100 && (crpm = SetFanSteady(fan_conf->lastSelectedFan, boost)) > bestBoostPoint.maxRPM - downScale) {
+        while (boost >= 100 && (crpm = SetFanSteady(fan_conf->lastSelectedFan, boost)) > bestBoostPoint.maxRPM - downScale) {
             bestBoostPoint.maxBoost = boost;
             boost -= steps;
         }
@@ -328,9 +343,15 @@ string GetFanName(int ind, bool forTray = false) {
         case 6: fname = "GPU"; break;
         default: fname = "Fan";
         }
+        if (forTray) {
+            fname += " (";
+            if (fan_conf->lastProf->powerStage)
+                fname += to_string(mon->senValues[0x100 + mon->acpi->fans[ind].type]);
+            else
+                fname += to_string(mon->senValues[mon->lastBoost[ind]]);
+            fname += ")";
+        }
         fname += " " + to_string(ind + 1) + " - " + to_string(mon->fanRpm[ind]);
-        if (forTray && !fan_conf->lastProf->powerStage)
-            fname += " (" + to_string(mon->senValues[mon->lastBoost[ind]]/*mon->boostRaw[ind]*/) + ")";
     }
     return fname;
 }
@@ -475,6 +496,5 @@ void AlterGMode(HWND power_list) {
         fan_conf->lastProf->gmodeStage = !fan_conf->lastProf->gmodeStage;
         mon->SetCurrentMode();
         ComboBox_SetCurSel(power_list, mon->powerMode);
-        BlinkNumLock(2 + fan_conf->lastProf->gmodeStage);
     }
 }

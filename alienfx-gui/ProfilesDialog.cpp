@@ -7,11 +7,9 @@
 
 extern void UpdateProfileList();
 extern void UpdateState(bool checkMode);
-extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
-extern void RedrawButton(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
-extern HWND CreateToolTip(HWND hwndParent, HWND oldTip);
-extern void SetSlider(HWND tt, int value);
-extern void RemoveUnusedGroups();
+extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode&);
+extern DWORD MakeRGB(AlienFX_SDK::Afx_colorcode c);
+extern void RedrawButton(HWND hDlg, DWORD);
 
 extern AlienFX_SDK::Afx_light* keySetLight;
 extern string GetKeyName(WORD vkcode);
@@ -20,24 +18,17 @@ extern BOOL CALLBACK KeyPressDialog(HWND hDlg, UINT message, WPARAM wParam, LPAR
 extern EventHandler* eve;
 extern FXHelper* fxhl;
 extern ConfigFan* fan_conf;
-//int /*pCid = -1, */devNum = -1;
+
+extern const char* freqNames[];
+extern const int* freqValues;
+
 profile* prof = NULL;
 AlienFX_SDK::Afx_device* activeEffectDevice = NULL;
 
-vector<deviceeffect>::iterator FindDevEffect(int type) {
-	for (auto effect = prof->effects.begin(); activeEffectDevice && effect != prof->effects.end(); effect++)
-		if (activeEffectDevice->pid == effect->pid &&
-			activeEffectDevice->vid == effect->vid &&
-			effect->globalMode == type)
-			return effect;
-	return prof->effects.end();
-}
-
-const static vector<string> ge_names[2]{ // 0 - v8, 1 - v5
-	{ "关闭", "Color or Morph", "Pulse", "Back Morph", "Breath", "Spectrum",
-	"One key (K)", "Circle out (K)", "Wave out (K)", "Right wave (K)", "Default", "Rain Drop (K)",
-	"Wave", "Rainbow wave", "Circle wave", "Random white (K)" },
-	{ "关闭", "单色静止", "呼吸", "走马灯（单层波）", "双层波", "脉冲", "渐变", "双向波", "射线", "彩虹渐变" }};
+const char* ge_names8[] = { "关闭", "Color or Morph", "脉冲", "Back Morph", "呼吸", "光谱",
+	"One key (K)", "Circle out (K)", "向外波谱 (K)", "右波谱 (K)", "默认", "雨点 (K)",
+	"波谱", "彩虹波", "Circle wave", "Random white (K)", ""},
+	*ge_names5[] = { "关闭", "单色静止", "呼吸", "走马灯（单层波）", "双层波", "脉冲", "渐变", "双向波", "射线", "彩虹渐变", ""};
 /*
 	0 - off
 	1 - static color
@@ -50,10 +41,23 @@ const static vector<string> ge_names[2]{ // 0 - v8, 1 - v5
 	12 - off
 	14 - rainbow
 */
-const static vector<string> cModeNames{ "单色", "多色", "彩虹" };
-const static vector<int> ge_types[2]{ { 0,1,2,3,7,8,9,10,11,12,13,14,15,16,17,18 },
-	{ 0,1,2,3,4,8,9,10,11,14 } };
-const static vector<int> cModeTypes{ 1, 2, 3 };
+const char* cModeNames[] = { "单色", "多色", "彩虹", ""};
+const int ge_types8[]{ 0,1,2,3,7,8,9,10,11,12,13,14,15,16,17,18 }, ge_types5[]{ 0,1,2,3,4,8,9,10,11,14 };
+
+deviceeffect* FindDevEffect(int type, bool remove = false) {
+	if (activeEffectDevice)
+		for (auto effect = prof->effects[activeEffectDevice->devID].begin(); activeEffectDevice && 
+			effect != prof->effects[activeEffectDevice->devID].end(); effect++)
+			if (effect->globalMode == type)
+				if (remove) {
+					prof->effects[activeEffectDevice->devID].erase(effect);
+					return nullptr;
+				}
+				else {
+					return &(*effect);
+				}
+	return nullptr;
+}
 
 void RefreshDeviceList(HWND hDlg) {
 	HWND dev_list = GetDlgItem(hDlg, IDC_DE_LIST);
@@ -67,38 +71,35 @@ void RefreshDeviceList(HWND hDlg) {
 			ListBox_SetItemData(dev_list, ind, pos);
 			if (i->devID == activeEffectDevice->devID) {
 				ListBox_SetCurSel(dev_list, ind);
-				vector<deviceeffect>::iterator b1 = FindDevEffect(1), b2 = FindDevEffect(2);
-				UpdateCombo(GetDlgItem(hDlg, IDC_GLOBAL_EFFECT), ge_names[i->version == 5],	b1 == prof->effects.end() ? 0 : b1->globalEffect, ge_types[i->version == 5]);
-				UpdateCombo(GetDlgItem(hDlg, IDC_GLOBAL_KEYEFFECT), ge_names[i->version == 5], b2 == prof->effects.end() ? 0 : b2->globalEffect, ge_types[i->version == 5]);
-
-				UpdateCombo(GetDlgItem(hDlg, IDC_CMODE), cModeNames, b1 == prof->effects.end() ? 1 : b1->colorMode, cModeTypes);
-				UpdateCombo(GetDlgItem(hDlg, IDC_CMODE_KEY), cModeNames, b2 == prof->effects.end() ? 1 : b2->colorMode, cModeTypes);
+				deviceeffect* b;
+				AlienFX_SDK::Afx_colorcode c1{ 0,0,0,0xff }, c2{ 0,0,0,0xff };
 
 				EnableWindow(GetDlgItem(hDlg, IDC_GLOBAL_KEYEFFECT), i->version == 8);
-				//EnableWindow(GetDlgItem(hDlg, IDC_CMODE), i->version == 8);
 				EnableWindow(GetDlgItem(hDlg, IDC_CMODE_KEY), i->version == 8);
 
-				if (b1 != prof->effects.end()) {
-					SendMessage(GetDlgItem(hDlg, IDC_SLIDER_TEMPO), TBM_SETPOS, true, b1->globalDelay);
-					SetSlider(sTip1, b1->globalDelay);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR1), &b1->effColor1);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR2), &b1->effColor2);
-				}
-				else {
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR1), NULL);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR2), NULL);
+				if (b = FindDevEffect(1)) {
+					SendMessage(GetDlgItem(hDlg, IDC_SLIDER_TEMPO), TBM_SETPOS, true, b->globalDelay);
+					SetSlider(sTip1, b->globalDelay);
+					c1 = b->effColor1; c2 = b->effColor2;
 				}
 
-				if (b2 != prof->effects.end()) {
-					SendMessage(GetDlgItem(hDlg, IDC_SLIDER_KEYTEMPO), TBM_SETPOS, true, b2->globalDelay);
-					SetSlider(sTip2, b2->globalDelay);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR3), &b2->effColor1);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR4), &b2->effColor2);
+				RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR1), MakeRGB(c1));
+				RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR2), MakeRGB(c2));
+				UpdateCombo(GetDlgItem(hDlg, IDC_GLOBAL_EFFECT), i->version == 8 ? ge_names8 : ge_names5, b ? b->globalEffect : 0, i->version == 8 ? ge_types8 : ge_types5);
+				UpdateCombo(GetDlgItem(hDlg, IDC_CMODE), cModeNames, b ? b->colorMode - 1 : 0);
+
+				c1 = c2 = { 0,0,0,0xff };
+
+				if (b = FindDevEffect(2)) {
+					SendMessage(GetDlgItem(hDlg, IDC_SLIDER_KEYTEMPO), TBM_SETPOS, true, b->globalDelay);
+					SetSlider(sTip2, b->globalDelay);
+					c1 = b->effColor1; c2 = b->effColor2;
 				}
-				else {
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR3), NULL);
-					RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR4), NULL);
-				}
+
+				RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR3), MakeRGB(c1));
+				RedrawButton(GetDlgItem(hDlg, IDC_BUTTON_EFFCLR4), MakeRGB(c2));
+				UpdateCombo(GetDlgItem(hDlg, IDC_GLOBAL_KEYEFFECT), i->version == 8 ? ge_names8 : ge_names5, b ? b->globalEffect : 0, i->version == 8 ? ge_types8 : ge_types5);
+				UpdateCombo(GetDlgItem(hDlg, IDC_CMODE_KEY), cModeNames, b ? b->colorMode - 1 : 0);
 			}
 		}
 }
@@ -109,7 +110,7 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 		eff_tempo = GetDlgItem(hDlg, IDC_SLIDER_TEMPO),
 		eff_keytempo = GetDlgItem(hDlg, IDC_SLIDER_KEYTEMPO);
 
-	vector<deviceeffect>::iterator b;
+	deviceeffect* b;
 
 	switch (LOWORD(wParam)) {
 	case IDC_CMODE:
@@ -148,8 +149,8 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 			switch (HIWORD(wParam)) {
 			case CBN_SELCHANGE:
 			{
-				if (b != prof->effects.end()) {
-					b->colorMode = (byte)ComboBox_GetItemData(GetDlgItem(hDlg, LOWORD(wParam)), ComboBox_GetCurSel(GetDlgItem(hDlg, LOWORD(wParam))));
+				if (b) {
+					b->colorMode = ComboBox_GetCurSel(GetDlgItem(hDlg, LOWORD(wParam))) + 1;
 				}
 			}
 			}
@@ -159,18 +160,16 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 			case CBN_SELCHANGE:
 			{
 				byte newEffect = (byte)ComboBox_GetItemData(GetDlgItem(hDlg, LOWORD(wParam)), ComboBox_GetCurSel(GetDlgItem(hDlg, LOWORD(wParam))));
-				if (b != prof->effects.end())
+				if (b)
 					b->globalEffect = newEffect;
 				else {
-					prof->effects.push_back({ activeEffectDevice->vid,
-						activeEffectDevice->pid, {0}, {0},
-						newEffect, 5, (byte)(LOWORD(wParam) == IDC_GLOBAL_EFFECT ? 1 : 2) });
-					b = prof->effects.end() - 1;
+					prof->effects[activeEffectDevice->devID].push_back({ {0}, {0}, newEffect, 5, (byte)(LOWORD(wParam) == IDC_GLOBAL_EFFECT ? 1 : 2) });
+					b = &prof->effects[activeEffectDevice->devID].back();
 				}
 				if (!newEffect) {
+					b = FindDevEffect(b->globalMode, true);
 					if (prof->id == conf->activeProfile->id)
 						fxhl->UpdateGlobalEffect(activeEffectDevice, true);
-					prof->effects.erase(b);
 				}
 				RefreshDeviceList(hDlg);
 			} break;
@@ -178,9 +177,9 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 		} break;
 		case IDC_BUTTON_EFFCLR1: case IDC_BUTTON_EFFCLR3: case IDC_BUTTON_EFFCLR2: case IDC_BUTTON_EFFCLR4:
 		{
-			if (b != prof->effects.end()) {
+			if (b) {
 				SetColor(GetDlgItem(hDlg, LOWORD(wParam)), LOWORD(wParam) == IDC_BUTTON_EFFCLR1 || LOWORD(wParam) == IDC_BUTTON_EFFCLR3 ?
-					&b->effColor1 : &b->effColor2);
+					b->effColor1 : b->effColor2);
 			}
 		} break;
 		default: return false;
@@ -192,9 +191,9 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 		UINT CtlID = ((DRAWITEMSTRUCT*)lParam)->CtlID;
 		switch (CtlID) {
 		case IDC_BUTTON_EFFCLR1: case IDC_BUTTON_EFFCLR2: case IDC_BUTTON_EFFCLR3: case IDC_BUTTON_EFFCLR4:
-			if (b != prof->effects.end()) {
-				RedrawButton(((DRAWITEMSTRUCT*)lParam)->hwndItem, CtlID == IDC_BUTTON_EFFCLR1 || CtlID == IDC_BUTTON_EFFCLR3 ?
-					&b->effColor1 : &b->effColor2);
+			if (b) {
+				RedrawButton(((DRAWITEMSTRUCT*)lParam)->hwndItem, MakeRGB(CtlID == IDC_BUTTON_EFFCLR1 || CtlID == IDC_BUTTON_EFFCLR3 ?
+					b->effColor1 : b->effColor2));
 			}
 			break;
 		}
@@ -205,7 +204,7 @@ BOOL CALLBACK DeviceEffectDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 			switch (LOWORD(wParam)) {
 			case TB_THUMBPOSITION: case TB_ENDTRACK:
 			{
-				if (b != prof->effects.end()) {
+				if (b) {
 					b->globalDelay = (BYTE) SendMessage((HWND) lParam, TBM_GETPOS, 0, 0);
 					SetSlider((HWND)lParam == eff_tempo ? sTip1 : sTip2, b->globalDelay);
 					if (prof->id == conf->activeProfile->id)
@@ -240,6 +239,9 @@ void ReloadProfSettings(HWND hDlg) {
 
 	SetDlgItemText(hDlg, IDC_TRIGGER_KEYS, ("Keyboard (" + (prof && prof->triggerkey ? GetKeyName(prof->triggerkey) : "Off") + ")").c_str());
 	SetDlgItemText(hDlg, IDC_SCRIPT_NAME, prof ? prof->script.c_str() : NULL);
+
+	UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_FREQ), freqNames, prof && prof->freqMode, freqValues);
+
 	ListBox_ResetContent(app_list);
 	if (prof)
 		for (auto j = prof->triggerapp.begin(); j != prof->triggerapp.end(); j++)
@@ -316,8 +318,7 @@ BOOL CALLBACK TabProfilesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		} break;
 		case IDC_REMOVEPROFILE:
 			if (!(prof->flags & PROF_DEFAULT) && conf->profiles.size() > 1) {
-				if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "是否确认删除当前预设及其中所有设置?", "警告!!!",
-							   MB_YESNO | MB_ICONWARNING) == IDYES) {
+				if (WarningBox(hDlg, "是否确认删除当前预设及其中所有设置?")) {
 					for (auto pf = conf->profiles.begin(); pf != conf->profiles.end(); pf++)
 						if ((*pf)->id == prof->id) {
 							profile* newpCid = (pf + 1) == conf->profiles.end() ? *(pf - 1) : *(pf + 1);
@@ -328,7 +329,7 @@ BOOL CALLBACK TabProfilesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 							}
 							delete prof;
 							prof = newpCid;
-							RemoveUnusedGroups();
+							conf->RemoveUnusedGroups();
 							UpdateProfileList();
 							ReloadProfileView(hDlg);
 							break;
@@ -339,8 +340,7 @@ BOOL CALLBACK TabProfilesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				ShowNotification(&conf->niData, "错误", "无法删除当前预设！");
 			break;
 		case IDC_BUT_PROFRESET:
-			if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "是否确认删除当前预设及其中的设置?", "警告!!!",
-										   MB_YESNO | MB_ICONWARNING) == IDYES) {
+			if (WarningBox(hDlg, "是否确认删除当前预设及其中的设置?")) {
 				for (auto it = prof->lightsets.begin(); it != prof->lightsets.end();) {
 					if (IsDlgButtonChecked(hDlg, IDC_CP_COLORS) == BST_CHECKED)
 						it->color.clear();
@@ -368,14 +368,13 @@ BOOL CALLBACK TabProfilesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				}
 				if (IsDlgButtonChecked(hDlg, IDC_CP_APPS) == BST_CHECKED)
 					prof->triggerapp.clear();
-				RemoveUnusedGroups();
+				conf->RemoveUnusedGroups();
 				if (IsDlgButtonChecked(hDlg, IDC_CP_FANS) == BST_CHECKED && prof->fansets) {
 					if (conf->activeProfile->id == prof->id)
 						fan_conf->lastProf = &fan_conf->prof;
 					delete (fan_profile*)prof->fansets;
 					prof->fansets = NULL;
 					prof->flags &= ~PROF_FANS;
-					//ReloadProfileView(hDlg);
 				}
 				if (conf->activeProfile->id == prof->id)
 					UpdateState(true);
@@ -465,6 +464,13 @@ BOOL CALLBACK TabProfilesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				else
 					return false;
 				break;
+			}
+			break;
+		case IDC_COMBO_FREQ:
+			if (HIWORD(wParam) == CBN_SELCHANGE) {
+				prof->freqMode = (DWORD)ComboBox_GetItemData(GetDlgItem(hDlg, IDC_COMBO_FREQ), ComboBox_GetCurSel(GetDlgItem(hDlg, IDC_COMBO_FREQ)));
+				if (prof->id == conf->activeProfile->id)
+					eve->SetDisplayFreq(prof->freqMode);
 			}
 			break;
 		case IDC_CHECK_EFFECTS:

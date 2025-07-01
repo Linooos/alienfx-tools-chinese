@@ -7,21 +7,22 @@ ThreadHelper::ThreadHelper(LPVOID function, LPVOID param, int delay, int prt) {
 	priority = prt;
 	func = (void (*)(LPVOID))function;
 	this->param = param;
+	tEvent = CreateEvent(NULL, true, false, NULL);
 	Start();
 }
 
 ThreadHelper::~ThreadHelper()
 {
 	Stop();
+	CloseHandle(tEvent);
 }
 
 void ThreadHelper::Stop()
 {
 	if (tHandle) {
 		SetEvent(tEvent);
-		int code = WaitForSingleObject(tHandle, INFINITE/*delay << 2*/);
-		CloseHandle(tHandle);
-		CloseHandle(tEvent);
+		WaitForSingleObject(tHandle, INFINITE/*delay << 2*/);
+		CloseHandle(tHandle);		
 		tHandle = NULL;
 	}
 }
@@ -29,9 +30,9 @@ void ThreadHelper::Stop()
 void ThreadHelper::Start()
 {
 	if (!tHandle) {
-		tEvent = CreateEvent(NULL, true, false, NULL);
 		tHandle = CreateThread(NULL, 0, ThreadFunc, this, 0, NULL);
-		SetThreadPriority(tHandle, priority);
+		if (tHandle)
+			SetThreadPriority(tHandle, priority);
 	}
 }
 
@@ -43,21 +44,4 @@ DWORD WINAPI ThreadFunc(LPVOID lpParam) {
 	return 0;
 }
 
-CustomMutex::CustomMutex()
-{
-	InitializeCriticalSection(&mHandle);
-}
-
-CustomMutex::~CustomMutex()
-{
-	DeleteCriticalSection(&mHandle);
-}
-
-void CustomMutex::lock() {
-	EnterCriticalSection(&mHandle);
-}
-
-void CustomMutex::unlock() {
-	LeaveCriticalSection(&mHandle);
-}
 

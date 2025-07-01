@@ -4,18 +4,29 @@
 #include "Common.h"
 #include "resource.h"
 
+// debug print
+#ifdef _DEBUG
+#define DebugPrint(_x_) OutputDebugString(string(_x_).c_str());
+#else
+#define DebugPrint(_x_)
+#endif
+
 extern HWND mDlg;
 extern ConfigFan* fan_conf;
-extern int eItem;
+extern HINSTANCE hInst;
+//extern int eItem;
 
 ConfigHandler::ConfigHandler() {
 
 	RegCreateKeyEx(HKEY_CURRENT_USER, TEXT("SOFTWARE\\Alienfxgui"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKeyMain, NULL);
 	RegCreateKeyEx(hKeyMain, TEXT("Profiles"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKeyProfiles, NULL);
 	RegCreateKeyEx(hKeyMain, TEXT("Zones"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKeyZones, NULL);
+	// for accent color
+	RegCreateKeyEx(HKEY_CURRENT_USER, TEXT("Software\\Microsoft\\Windows\\DWM"), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_READ, NULL, &hKeyAccent, NULL);
+
 	afx_dev.LoadMappings();
 	fan_conf = new ConfigFan();
-	niData.hIcon = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ALIENFX_ON),	IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+	niData.hIcon = (HICON)LoadImage(hInst, MAKEINTRESOURCE(IDI_ALIENFX_ON),	IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
 }
 
 ConfigHandler::~ConfigHandler() {
@@ -25,6 +36,7 @@ ConfigHandler::~ConfigHandler() {
 	RegCloseKey(hKeyMain);
 	RegCloseKey(hKeyZones);
 	RegCloseKey(hKeyProfiles);
+	RegCloseKey(hKeyAccent);
 }
 
 profile* ConfigHandler::FindCreateProfile(unsigned id) {
@@ -38,12 +50,14 @@ profile* ConfigHandler::FindCreateProfile(unsigned id) {
 
 AlienFX_SDK::Afx_group* ConfigHandler::FindCreateGroup(int groupID) {
 	AlienFX_SDK::Afx_group* grp = nullptr;
-	if (groupID) {
-		if (!(grp = afx_dev.GetGroupById(groupID))) {
-			afx_dev.GetGroups()->push_back({ (DWORD)groupID, "New zone #" + to_string((groupID & 0xffff) + 1) });
-			grp = &afx_dev.GetGroups()->back();
-		}
+	if (groupID < 0)
+		groupID = 0x1ffff;
+
+	if (!(grp = afx_dev.GetGroupById(groupID))) {
+		afx_dev.GetGroups()->push_back({ (DWORD)groupID, "New zone #" + to_string((groupID & 0xffff) + 1) });
+		grp = &afx_dev.GetGroups()->back();
 	}
+
 	return grp;
 }
 
@@ -51,9 +65,13 @@ groupset* ConfigHandler::FindCreateGroupSet(int profID, int groupID)
 {
 	profile* prof = FindProfile(profID);
 	if (prof) {
+		// -1 group patch
+		if (groupID < 0) {
+			groupID = 0x1ffff;
+		}
 		groupset* gset = FindMapping(groupID, &prof->lightsets);
-		FindCreateGroup(groupID);
 		if (!gset) {
+			FindCreateGroup(groupID);
 			prof->lightsets.push_back({ groupID });
 			gset = &prof->lightsets.back();
 		}
@@ -87,19 +105,21 @@ profile* ConfigHandler::FindProfileByApp(string appName, bool active)
 }
 
 bool ConfigHandler::IsPriorityProfile(profile* prof) {
-	return prof->flags & PROF_PRIORITY;
+	return prof ? prof->flags & PROF_PRIORITY : false;
 }
 
-//bool ConfigHandler::IsActiveOnly(profile* prof) {
-//	return prof->flags & PROF_ACTIVE;
-//}
-
-void ConfigHandler::SetIconState() {
+bool ConfigHandler::SetIconState(bool needCheck) {
 	// change tray icon...
-	niData.hIcon = (HICON)LoadImage(GetModuleHandle(NULL),
+	niData.hIcon = (HICON)LoadImage(hInst,
 		MAKEINTRESOURCE(stateOn ? stateDimmed ? IDI_ALIENFX_DIM : IDI_ALIENFX_ON : IDI_ALIENFX_OFF),
 		IMAGE_ICON,	GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-	AddTrayIcon(&niData, false);
+	return AddTrayIcon(&niData, needCheck);
+}
+
+DWORD ConfigHandler::GetAccentColor() {
+	DWORD size = sizeof(DWORD), value = 0;
+	RegGetValue(hKeyAccent, NULL, "AccentColor", RRF_RT_DWORD | RRF_ZEROONFAILURE, NULL, &value, &size);
+	return value & 0xffffff;
 }
 
 void ConfigHandler::GetReg(char *name, DWORD *value, DWORD defValue) {
@@ -131,6 +151,8 @@ void ConfigHandler::Load() {
 	GetReg("NoDesktopSwitch", &noDesktop);
 	GetReg("DimPower", &dimPowerButton);
 	GetReg("DimmedOnBattery", &dimmedBatt);
+	GetReg("TimeoutOn", &actionLights);
+	GetReg("TimeoutLength", &actionTimeout, 30);
 	GetReg("ActiveProfile", &activeProfileID);
 	GetReg("OffPowerButton", &offPowerButton);
 	GetReg("EsifTemp", &esif_temp);
@@ -142,6 +164,8 @@ void ConfigHandler::Load() {
 	GetReg("ShowGridNames", &showGridNames);
 	GetReg("KeyboardShortcut", &keyShortcuts, 1);
 	GetReg("GESpeed", &geTact, 100);
+	GetReg("MonDC", &dcFreq, 0);
+
 	RegGetValue(hKeyMain, NULL, TEXT("CustomColors"), RRF_RT_REG_BINARY | RRF_ZEROONFAILURE, NULL, customColors, &size_c);
 
 	// Ambient....
@@ -152,6 +176,8 @@ void ConfigHandler::Load() {
 
 	// Haptics....
 	GetReg("Haptics-Input", &hap_inpType);
+
+	accentColor = GetAccentColor();
 
 	char name[256];
 	int pid, appid, profID, groupID, recSize;
@@ -183,13 +209,17 @@ void ConfigHandler::Load() {
 			FindCreateProfile(pid)->script = GetRegString(data, lend);
 			continue;
 		}
+		if (sscanf_s(name, "Profile-freq-%d", &pid) == 1) {
+			FindCreateProfile(pid)->freqMode = *(DWORD*)data;
+			continue;
+		}
 		int senid, fanid;
 		if (sscanf_s(name, "Profile-fan-%d-%d-%d", &pid, &fanid, &senid) == 3) {
 			((ConfigFan*)fan_conf)->AddSensorCurve(((fan_profile*)FindCreateProfile(pid)->fansets), fanid, senid, data, lend);
 			continue;
 		}
-		if (sscanf_s(name, "Profile-effect-%d-%d", &pid, &senid) == 2) {
-			FindCreateProfile(pid)->effects.push_back(*(deviceeffect*)data);
+		if (sscanf_s(name, "Profile-effect-%d-%ud-%d", &pid, &groupID, &senid) == 2) {
+			FindCreateProfile(pid)->effects[groupID].push_back(*(deviceeffect*)data);
 			continue;
 		}
 		if (sscanf_s(name, "Profile-power-%d", &pid) == 1) {
@@ -197,12 +227,14 @@ void ConfigHandler::Load() {
 			if (!prof->fansets)
 				prof->fansets = new fan_profile();
 			((fan_profile*)prof->fansets)->powerSet = *(DWORD*)data;
+			continue;
 		}
 		if (sscanf_s(name, "Profile-OC-%d", &pid) == 1) {
 			prof = FindCreateProfile(pid);
 			if (!prof->fansets)
 				prof->fansets = new fan_profile();
 			((fan_profile*)prof->fansets)->ocSettings = *(DWORD*)data;
+			continue;
 		}
 	}
 	// Loading zones...
@@ -304,6 +336,8 @@ void ConfigHandler::Save() {
 	SetReg("NoDesktopSwitch", noDesktop);
 	SetReg("DimPower", dimPowerButton);
 	SetReg("DimmedOnBattery", dimmedBatt);
+	SetReg("TimeoutOn", actionLights);
+	SetReg("TimeoutLength", actionTimeout);
 	SetReg("OffPowerButton", offPowerButton);
 	SetReg("OffOnBattery", offOnBattery);
 	SetReg("DimmingPower", dimmingPower);
@@ -318,6 +352,8 @@ void ConfigHandler::Save() {
 	SetReg("ShowGridNames", showGridNames);
 	SetReg("KeyboardShortcut", keyShortcuts);
 	SetReg("GESpeed", geTact);
+	SetReg("MonDC", dcFreq);
+
 	RegSetValueEx(hKeyMain, TEXT("CustomColors"), 0, REG_BINARY, (BYTE*)customColors, sizeof(DWORD) * 16);
 
 	// Ambient
@@ -343,6 +379,8 @@ void ConfigHandler::Save() {
 		RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_DWORD, (BYTE*)&prof->gflags, sizeof(DWORD));
 		name = "Profile-triggers-" + profID;
 		RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_DWORD, (BYTE*)&prof->triggers, sizeof(DWORD));
+		name = "Profile-freq-" + profID;
+		RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_DWORD, (BYTE*)&prof->freqMode, sizeof(DWORD));
 		if (prof->script.size()) {
 			name = "Profile-script-" + profID;
 			RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_SZ, (BYTE*)prof->script.c_str(), (DWORD)prof->script.size());
@@ -404,8 +442,10 @@ void ConfigHandler::Save() {
 
 		// Global effects
 		for (auto it = prof->effects.begin(); it != prof->effects.end(); it++) {
-			name = "Profile-effect-" + profID + "-" + to_string(it - prof->effects.begin());
-			RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_BINARY, (byte*)&(*it), sizeof(deviceeffect));
+			for (auto i = it->second.begin(); i != it->second.end(); i++) {
+				name = "Profile-effect-" + profID + "-" + to_string(it->first) + "-" + to_string(i->globalMode);
+				RegSetValueEx(hKeyProfiles, name.c_str(), 0, REG_BINARY, (byte*)&(*i), sizeof(deviceeffect));
+			}
 		}
 		// Fans....
 		if (prof->flags & PROF_FANS) {
@@ -421,87 +461,81 @@ void ConfigHandler::Save() {
 }
 
 zonemap* ConfigHandler::FindZoneMap(int gid, bool reset) {
-	zoneUpdate.lock();
-		if (!(zoneMaps[gid].gMinX == 255 || reset)) {
-		zoneUpdate.unlock();
-		return &zoneMaps[gid];
-	}
+	zoneUpdate.lockWrite();
 
-	// create new zoneMap
-	auto zone = &zoneMaps[gid];
-	*zone = { mainGrid->id };
+	if (reset || zoneMaps.find(gid) == zoneMaps.end()) {
+		// create new zoneMap
+		zoneMaps.erase(gid);
+		zonemap* zone = &zoneMaps[gid];
 
-	AlienFX_SDK::Afx_group* grp = afx_dev.GetGroupById(gid);
-	if (grp && grp->lights.size()) {
-		// find operational grid...
-		DWORD lgt = grp->lights.front().lgh;
-		AlienFX_SDK::Afx_grid* opGrid = NULL;
-		for (auto t = afx_dev.GetGrids()->begin(); !opGrid && t < afx_dev.GetGrids()->end(); t++)
-			for (int ind = 0; ind < t->x * t->y; ind++)
-				if (t->grid[ind].lgh == lgt) {
-					zone->gridID = t->id;
-					opGrid = &(*t);
-					break;
-				}
-
-		if (opGrid) {
-
-			// scan light positions in grid and set power
-			zone->havePower = false;
-			for (AlienFX_SDK::Afx_groupLight& lgh : grp->lights) {
-				if (afx_dev.GetFlags(lgh.did, lgh.lid) & ALIENFX_FLAG_POWER)
-					zone->havePower = true;
-				zonelight cl{ lgh.lgh, 255, 255 };
-				for (int ind = 0; ind < opGrid->x * opGrid->y; ind++)
-					if (opGrid->grid[ind].lgh == lgh.lgh) {
-						cl.x = min(cl.x, ind % opGrid->x);
-						cl.y = min(cl.y, ind / opGrid->x);
-						zone->xMax = max(zone->xMax, ind % opGrid->x);
-						zone->yMax = max(zone->yMax, ind / opGrid->x);
-						//zone->gMaxX = max(zone->gMaxX, cl.x);
-						//zone->gMaxY = max(zone->gMaxY, cl.y);
-						//zone->gMinX = min(zone->gMinX, cl.x);
-						//zone->gMinY = min(zone->gMinY, cl.y);
-						//zone->lightMap.push_back(cl);
-						//break;
+		AlienFX_SDK::Afx_group* grp = afx_dev.GetGroupById(gid);
+		if (grp && grp->lights.size()) {
+			// find operational grid...
+			AlienFX_SDK::Afx_grid* opGrid = NULL;
+			for (auto t = afx_dev.GetGrids()->begin(); !opGrid && t < afx_dev.GetGrids()->end(); t++)
+				for (int ind = 0; ind < t->x * t->y; ind++)
+					if (IsLightInGroup(t->grid[ind].lgh, grp)) {
+						zone->gridID = t->id;
+						opGrid = &(*t);
+						break;
 					}
-				// Ignore light if not in grid
-				if (cl.x < 255 && cl.y < 255) {
-					zone->gMaxX = max(zone->gMaxX, cl.x);
-					zone->gMaxY = max(zone->gMaxY, cl.y);
-					zone->gMinX = min(zone->gMinX, cl.x);
-					zone->gMinY = min(zone->gMinY, cl.y);
-					zone->lightMap.push_back(cl);
-				}
-			}
 
-			// now shrink axis...
-			for (zonelight& t : zone->lightMap) {
-				t.x -= zone->gMinX; t.y -= zone->gMinY;
+			if (opGrid) {
+				// scan light positions in grid and set power
+				zone->havePower = false;
+				for (AlienFX_SDK::Afx_groupLight& lgh : grp->lights) {
+					if (afx_dev.GetFlags(lgh.did, lgh.lid) & ALIENFX_FLAG_POWER)
+						zone->havePower = true;
+					zonelight cl{ lgh.lgh, 255, 255 };
+					for (int ind = 0; ind < opGrid->x * opGrid->y; ind++)
+						if (opGrid->grid[ind].lgh == lgh.lgh) {
+							cl.x = min(cl.x, ind % opGrid->x);
+							cl.y = min(cl.y, ind / opGrid->x);
+							zone->xMax = max(zone->xMax, ind % opGrid->x);
+							zone->yMax = max(zone->yMax, ind / opGrid->x);
+							//zone->gMaxX = max(zone->gMaxX, cl.x);
+							//zone->gMaxY = max(zone->gMaxY, cl.y);
+							//zone->gMinX = min(zone->gMinX, cl.x);
+							//zone->gMinY = min(zone->gMinY, cl.y);
+							//zone->lightMap.push_back(cl);
+							//break;
+						}
+					// Ignore light if not in grid
+					if (cl.x < 255 && cl.y < 255) {
+						zone->gMaxX = max(zone->gMaxX, cl.x);
+						zone->gMaxY = max(zone->gMaxY, cl.y);
+						zone->gMinX = min(zone->gMinX, cl.x);
+						zone->gMinY = min(zone->gMinY, cl.y);
+						zone->lightMap.push_back(cl);
+					}
+				}
+
+				// now shrink axis...
+				for (zonelight& t : zone->lightMap) {
+					t.x -= zone->gMinX; t.y -= zone->gMinY;
+				}
+				// Scales...
+				zone->scaleX = zone->gMaxX = zone->gMaxX + 1 - zone->gMinX;
+				zone->scaleY = zone->gMaxY = zone->gMaxY + 1 - zone->gMinY;
+				for (int x = 1; x < zone->gMaxX; x++)
+					if (none_of(zone->lightMap.begin(), zone->lightMap.end(),
+						[x](auto t) {
+							return t.x == x;
+						})) {
+						zone->scaleX--;
+					}
+				for (int y = 1; y < zone->gMaxY; y++)
+					if (none_of(zone->lightMap.begin(), zone->lightMap.end(),
+						[y](auto t) {
+							return t.y == y;
+						})) {
+						zone->scaleY--;
+					}
 			}
-			// Scales...
-			zone->scaleX = zone->gMaxX = zone->gMaxX + 1 - zone->gMinX;
-			zone->scaleY = zone->gMaxY = zone->gMaxY + 1 - zone->gMinY;
-			for (int x = 1; x < zone->gMaxX; x++)
-				if (none_of(zone->lightMap.begin(), zone->lightMap.end(),
-					[x](auto t) {
-						return t.x == x;
-					})) {
-					zone->scaleX--;
-				}
-			for (int y = 1; y < zone->gMaxY; y++)
-				if (none_of(zone->lightMap.begin(), zone->lightMap.end(),
-					[y](auto t) {
-						return t.y == y;
-					})) {
-					zone->scaleY--;
-				}
 		}
-		else
-			zone->gMinX = 0;
 	}
-	zoneUpdate.unlock();
-	return zone;
+	zoneUpdate.unlockWrite();
+	return &zoneMaps[gid];
 }
 
 groupset* ConfigHandler::FindMapping(int mid, vector<groupset>* set)
@@ -514,8 +548,33 @@ groupset* ConfigHandler::FindMapping(int mid, vector<groupset>* set)
 	return nullptr;
 }
 
+bool ConfigHandler::IsLightInGroup(DWORD lgh, AlienFX_SDK::Afx_group* grp) {
+	if (grp)
+		//return find(grp->lights.begin(), grp->lights.end(), lgh) != grp->lights.end();
+		for (auto pos = grp->lights.begin(); pos < grp->lights.end(); pos++)
+			if (pos->lgh == lgh)
+				return true;
+	return false;
+}
+
 void ConfigHandler::SetRandomColor(AlienFX_SDK::Afx_colorcode* clr) {
 	clr->r = (byte)rclr(rnd);
 	clr->g = (byte)rclr(rnd);
 	clr->b = (byte)rclr(rnd);
+}
+
+void ConfigHandler::RemoveUnusedGroups() {
+	for (auto i = afx_dev.GetGroups()->begin(); i != afx_dev.GetGroups()->end();) {
+		for (auto prof = profiles.begin(); prof != profiles.end(); prof++) {
+			for (auto ls = (*prof)->lightsets.begin(); ls != (*prof)->lightsets.end(); ls++)
+				if (ls->group == i->gid) {
+					//i++;
+					goto nextgroup;
+				}
+		}
+		i = afx_dev.GetGroups()->erase(i);
+		continue;
+	nextgroup:
+		i++;
+	}
 }

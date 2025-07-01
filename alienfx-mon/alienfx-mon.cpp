@@ -18,6 +18,8 @@ bool isNewVersion = false;
 bool runUIUpdate = true;
 DWORD selSensor = 0xffffffff;
 
+int idc_version = IDC_STATIC_VERSION, idc_homepage = IDC_SYSLINK_HOMEPAGE; // for About
+
 AlienFan_SDK::Control* acpi = NULL;
 
 UINT newTaskBar = RegisterWindowMessage(TEXT("TaskbarCreated"));
@@ -26,9 +28,8 @@ ConfigMon* conf;
 SenMonHelper* senmon;
 
 // Forward declarations of functions included in this code module:
-HWND                InitInstance(HINSTANCE, int);
+//HWND                InitInstance(HINSTANCE, int);
 BOOL CALLBACK       DialogMain(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 bool IsSensorValid(map<DWORD, SENSOR>::iterator sen) {
 	if (sen != conf->active_sensors.end()) {
@@ -71,18 +72,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
 	//UNREFERENCED_PARAMETER(nCmdShow);
 
+	// Perform application initialization:
+	hInst = hInstance;
+
 	ResetDPIScale(lpCmdLine);
 
 	conf = new ConfigMon();
 
 	senmon = new SenMonHelper();
 
-    // Perform application initialization:
-	hInst = hInstance;
-
 	if (CreateDialog(hInst, MAKEINTRESOURCE(IDD_MAIN_WINDOW), NULL, (DLGPROC)DialogMain)) {
-		SendMessage(mDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ALIENFXMON)));
-		SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ALIENFXMON), IMAGE_ICON, 16, 16, 0));
+		SendMessage(mDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIcon(hInst, MAKEINTRESOURCE(IDI_ALIENFXMON)));
+		SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(hInst, MAKEINTRESOURCE(IDI_ALIENFXMON), IMAGE_ICON, 16, 16, 0));
 
 		ShowWindow(mDlg, conf->startMinimized ? SW_HIDE : SW_SHOW);
 
@@ -98,41 +99,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	delete conf;
 
     return 0;
-}
-
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	UNREFERENCED_PARAMETER(lParam);
-	switch (message)
-	{
-	case WM_INITDIALOG: {
-		SetDlgItemText(hDlg, IDC_STATIC_VERSION, ("Version: " + GetAppVersion()).c_str());
-		return (INT_PTR)TRUE;
-	} break;
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case IDOK: case IDCANCEL:
-		{
-			EndDialog(hDlg, LOWORD(wParam));
-			return (INT_PTR)TRUE;
-		} break;
-		}
-		break;
-	case WM_NOTIFY:
-		switch (LOWORD(wParam)) {
-		case IDC_SYSLINK_HOMEPAGE:
-			switch (((LPNMHDR)lParam)->code)
-			{
-			case NM_CLICK:
-			case NM_RETURN:
-			{
-				ShellExecute(NULL, "open", "https://github.com/T-Troll/alienfx-tools", NULL, NULL, SW_SHOWNORMAL);
-			} break;
-			} break;
-		}
-		break;
-	}
-	return (INT_PTR)FALSE;
 }
 
 void RedrawButton(unsigned id, DWORD clr) {
@@ -157,7 +123,8 @@ char* GetSensorName(SENSOR* id) {
 	return (LPSTR)(id->name.length() ? id->name : id->sname).c_str();
 }
 
-const static vector<string> uiColumns{ "Min", "Cur", "Max", "Source", "Name" };
+const char* uiColumns[] = { "Min", "Cur", "Max", "Source", "Name" };
+const char sid0[] = { 'C', 'R', 'H', 'B', 'G', 'T' };
 
 void SetNumValue(HWND list, int pos, int col, int val) {
 	string name = val > NO_SEN_VALUE ? to_string(val) : "--";
@@ -171,9 +138,9 @@ void ReloadSensorView() {
 	ListView_SetExtendedListViewStyle(list, LVS_EX_GRIDLINES | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
 	if (!ListView_GetColumnWidth(list, 0)) {
 		LVCOLUMNA lCol{ LVCF_TEXT | LVCF_SUBITEM };
-		for (int i = 0; i < uiColumns.size(); i++) {
+		for (int i = 0; i < 5; i++) {
 			lCol.iSubItem = i;
-			lCol.pszText = (LPSTR)uiColumns[i].c_str();
+			lCol.pszText = (LPSTR)uiColumns[i];
 			ListView_InsertColumn(list, i, &lCol);
 		}
 	}
@@ -196,15 +163,7 @@ void ReloadSensorView() {
 			SetNumValue(list, pos, 2, sen->max);
 			string name;
 			switch (sid.source) {
-			case 0: name = "W";
-				switch (sid.type) {
-				case 0: name += "C"; break;
-				case 1: name += "R"; break;
-				case 2: name += "H"; break;
-				case 3: name += "B"; break;
-				case 4: name += "G"; break;
-				case 5: name += "T"; break;
-				}
+			case 0: name = string("W") + sid0[sid.type];
 				break;
 			case 1: name = "I";
 				switch (sid.type) {

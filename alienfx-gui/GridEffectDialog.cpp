@@ -4,8 +4,9 @@
 #include "FXHelper.h"
 #include "GridHelper.h"
 
-extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
-extern void RedrawButton(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
+extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode&);
+extern DWORD MakeRGB(AlienFX_SDK::Afx_colorcode c);
+extern void RedrawButton(HWND hDlg, DWORD);
 extern void UpdateZoneAndGrid();
 
 extern EventHandler* eve;
@@ -40,7 +41,7 @@ void RebuildGEColorsList(HWND hDlg) {
 			LVITEMA lItem{ LVIF_TEXT | LVIF_IMAGE | LVIF_STATE, i };
 			picData = new COLORREF[GetSystemMetrics(SM_CXSMICON) * GetSystemMetrics(SM_CYSMICON)];
 			fill_n(picData, GetSystemMetrics(SM_CXSMICON) * GetSystemMetrics(SM_CYSMICON),
-				RGB(colors->at(i).b, colors->at(i).g, colors->at(i).r));
+				/*MakeRGB(*/colors->at(i).ci);
 			colorBox = CreateBitmap(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 1, 32, picData);
 			delete[] picData;
 			ImageList_Add(hSmall, colorBox, NULL);
@@ -64,16 +65,16 @@ void ChangeAddGEColor(HWND hDlg, int newColorID) {
 	if (mmap) {
 		vector<AlienFX_SDK::Afx_colorcode>* clr = &mmap->effect.effectColors;
 		if (newColorID < clr->size())
-			SetColor(GetDlgItem(hDlg, IDC_BUT_GECOLOR), &clr->at(newColorID));
+			SetColor(GetDlgItem(hDlg, IDC_BUT_GECOLOR), clr->at(newColorID));
 		else {
 			AlienFX_SDK::Afx_colorcode act{ 0 };
 			// add new color
-			if (clrListID < clr->size())
-				act = clr->at(clrListID);
 			if (clr->empty())
 				clr->push_back(act);
+			if (clrListID < clr->size())
+				act = clr->at(clrListID);
 			clr->push_back(act);
-			if (SetColor(GetDlgItem(hDlg, IDC_BUT_GECOLOR), &clr->at(newColorID)))
+			if (SetColor(GetDlgItem(hDlg, IDC_BUT_GECOLOR), clr->at(newColorID)))
 				clrListID = newColorID;
 			else
 				clr->pop_back();
@@ -100,6 +101,9 @@ void UpdateEffectInfo(HWND hDlg) {
 	RebuildGEColorsList(hDlg);
 }
 
+const char* triggerNames[] = { "??", "??", "??", "??", "????", "" },
+	*effectTypeNames[] = { "???", "??", "??", "??", "??", "??", ""};
+
 BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND speed_slider = GetDlgItem(hDlg, IDC_SLIDER_SPEED),
 		width_slider = GetDlgItem(hDlg, IDC_SLIDER_WIDTH),
@@ -109,8 +113,8 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 	{
 	case WM_INITDIALOG:
 	{
-		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_TRIGGER), { "¹Ø±Õ", "Á¬Ðø", "¼üÅÌ", "ÊÂ¼þ", "ÆÁÄ»Ó³Éä" });
-		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GEFFTYPE), { "×ßÂíµÆ", "ÀËÓ¿", "½¥±ä", "³ä³â", "ÐÇ¿Õ", "ÏûÊÅ"});
+		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_TRIGGER), triggerNames);
+		UpdateCombo(GetDlgItem(hDlg, IDC_COMBO_GEFFTYPE), effectTypeNames);
 		SendMessage(speed_slider, TBM_SETRANGE, true, MAKELPARAM(-80, 80));
 		SendMessage(width_slider, TBM_SETRANGE, true, MAKELPARAM(1, 80));
 		SendMessage(gs_slider, TBM_SETRANGE, true, MAKELPARAM(5, 1000));
@@ -134,7 +138,9 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 		{
 		case IDC_COMBO_TRIGGER:
 			if (HIWORD(wParam) == CBN_SELCHANGE) {
+				conf->modifyProfile.lockWrite();
 				mmap->effect.trigger = ComboBox_GetCurSel(GetDlgItem(hDlg, LOWORD(wParam)));
+				conf->modifyProfile.unlockWrite();
 				eve->ChangeEffects();
 				UpdateZoneAndGrid();
 			}
@@ -212,7 +218,7 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 		break;
 	case WM_DRAWITEM:
 		if (mmap && clrListID < mmap->effect.effectColors.size()) {
-			RedrawButton(GetDlgItem(hDlg, IDC_BUT_GECOLOR), &mmap->effect.effectColors[clrListID]);
+			RedrawButton(GetDlgItem(hDlg, IDC_BUT_GECOLOR), MakeRGB(mmap->effect.effectColors[clrListID]));
 		}
 	    break;
 	case WM_NOTIFY:
@@ -225,7 +231,7 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 					// Select other item...
 					clrListID = lPoint->iItem;
 					if (clrListID < mmap->effect.effectColors.size())
-						RedrawButton(GetDlgItem(hDlg, IDC_BUT_GECOLOR), &mmap->effect.effectColors[clrListID]);
+						RedrawButton(GetDlgItem(hDlg, IDC_BUT_GECOLOR), MakeRGB(mmap->effect.effectColors[clrListID]));
 				}
 			} break;
 			case NM_DBLCLK:

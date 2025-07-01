@@ -19,7 +19,7 @@ extern void OnGridSelChanged(HWND);
 extern void RedrawGridButtonZone(RECT* what = NULL);
 extern void RecalcGridZone(RECT*);
 
-extern void CreateTabControl(HWND parent, vector<string> names, vector<DWORD> resID, vector<DLGPROC> func);
+extern void CreateTabControl(HWND parent, int tabsize, const char* names[], const DWORD* resID, const DLGPROC* func);
 extern void ClearOldTabs(HWND);
 
 extern int tabLightSel;
@@ -52,7 +52,7 @@ BOOL CALLBACK LightDlgFrame(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 		CreateGridBlock(gridTab, (DLGPROC)TabGrid);
 	} break;
 	case WM_APP + 2: {
-		if (mmap) {
+		if (mmap && lParam) {
 			zonemap zone = *conf->FindZoneMap(mmap->group);
 			if (zone.gridID != conf->mainGrid->id) {
 				// Switch grid tab
@@ -141,6 +141,11 @@ void OnLightSelChanged(HWND hwndDlg)
 	}
 }
 
+const char* lightTabNames[] = { "颜色", "事件监视器", "屏幕映射", "音频映射", "布局灯光特效", "灯光硬件及预设" };
+const DWORD lightRes[] = { IDD_DIALOG_COLORS, IDD_DIALOG_EVENTS, IDD_DIALOG_AMBIENT, IDD_DIALOG_HAPTICS, IDD_DIALOG_GRIDEFFECT, IDD_DIALOG_DEVICES };
+const DLGPROC lightsProc[] = { (DLGPROC)TabColorDialog, (DLGPROC)TabEventsDialog, (DLGPROC)TabAmbientDialog, (DLGPROC)TabHapticsDialog,
+			(DLGPROC)TabGridDialog, (DLGPROC)TabDevicesDialog };
+
 BOOL CALLBACK TabLightsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND tab_list = GetDlgItem(hDlg, IDC_TAB_LIGHTS);
 	switch (message)
@@ -148,11 +153,7 @@ BOOL CALLBACK TabLightsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 	case WM_INITDIALOG:
 	{
 		//firstInit = true;
-		CreateTabControl(tab_list,
-			{"颜色", "事件监视器", "屏幕映射", "音频映射", "布局灯光特效", "灯光硬件及预设"},
-			{ IDD_DIALOG_COLORS, IDD_DIALOG_EVENTS, IDD_DIALOG_AMBIENT, IDD_DIALOG_HAPTICS, IDD_DIALOG_GRIDEFFECT, IDD_DIALOG_DEVICES},
-			{ (DLGPROC)TabColorDialog, (DLGPROC)TabEventsDialog, (DLGPROC)TabAmbientDialog, (DLGPROC)TabHapticsDialog,
-			(DLGPROC)TabGridDialog, (DLGPROC)TabDevicesDialog } );
+		CreateTabControl(tab_list, 6, lightTabNames, lightRes, lightsProc);
 		TabCtrl_SetCurSel(tab_list, tabLightSel);
 		OnLightSelChanged(tab_list);
 	} break;

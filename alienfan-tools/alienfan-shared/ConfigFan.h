@@ -1,12 +1,11 @@
 #pragma once
 
-#include <vector>
 #include <map>
 #include "alienfan-sdk.h"
 
 using namespace std;
 
-DWORD WINAPI DPTFInit(LPVOID lparam);
+//DWORD WINAPI DPTFInit(LPVOID lparam);
 
 struct fan_point {
 	byte temp, boost;
@@ -20,7 +19,8 @@ struct sen_block {
 struct fan_profile {
 	union {
 		struct {
-			WORD powerStage;
+			byte powerStage;
+			byte powerStageDC;
 			WORD gmodeStage;
 		};
 		DWORD powerSet = 0;
@@ -55,10 +55,12 @@ public:
 	DWORD awcc_disable;
 	DWORD keyShortcuts;
 	DWORD keepSystem;
-	DWORD needDPTF;
+	//DWORD needDPTF;
 	DWORD pollingRate;
 	DWORD ocEnable;
-	bool wasAWCC;
+	DWORD diskSensors;
+	//bool wasAWCC;
+	bool acPower = true;
 
 	fan_profile prof;
 	fan_profile* lastProf = &prof;
@@ -72,7 +74,6 @@ public:
 
 	void AddSensorCurve(fan_profile* prof, byte fid, WORD sid, byte* data, DWORD lend);
 	void SaveSensorBlocks(HKEY key, string pname, fan_profile* data);
-	//DWORD GetRegData(HKEY key, int vindex, char* name, byte** data);
 	string* GetPowerName(int index);
 	string GetSensorName(AlienFan_SDK::ALIENFAN_SEN_INFO* acpi);
 	void UpdateBoost(byte fanID, byte boost, WORD rpm);

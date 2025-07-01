@@ -16,6 +16,8 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 HINSTANCE hInst;
 bool isNewVersion = false;
 bool needUpdateFeedback = false;
+bool wasAWCC = false;
+int idc_version = IDC_STATIC_VERSION, idc_homepage = IDC_SYSLINK_HOMEPAGE; // for About
 
 extern void dxgi_Restart();
 
@@ -37,10 +39,11 @@ ThreadHelper* updateUI = NULL;
 HWND mDlg = NULL, dDlg = NULL;
 
 // color selection:
-AlienFX_SDK::Afx_action* mod;
+AlienFX_SDK::Afx_action* mod; //  Current user-selected color
+AlienFX_SDK::Afx_action lastColor; // last selected color
+bool needColorUpdate; // is needed to update group after color change?
 
 HANDLE haveLightFX;
-//bool noLightFX = true;
 
 // tooltips
 HWND sTip1 = 0, sTip2 = 0, sTip3 = 0;
@@ -56,8 +59,10 @@ UINT newTaskBar = RegisterWindowMessage(TEXT("TaskbarCreated"));
 int eItem = 0;
 // last zone selected
 groupset* mmap = NULL;
-// last device selected
-AlienFX_SDK::Afx_device* activeDevice = NULL;
+
+const char* freqNames[] = { "Default", "60Hz", "90Hz", "120Hz", "144Hz", "165Hz", "240Hz", "360Hz", ""};
+const int fvArray[] = { 0, 60, 90, 120, 144, 165, 240, 360 };
+const int* freqValues = fvArray;
 
 extern string GetFanName(int ind, bool forTray = false);
 extern void AlterGMode(HWND);
@@ -65,13 +70,11 @@ extern void AlterGMode(HWND);
 bool DetectFans() {
 	if (conf->fanControl && (conf->fanControl = EvaluteToAdmin(mDlg))) {
 		mon = new MonHelper();
-		if (conf->fanControl = mon->acpi->isSupported) {
-			if (fan_conf->needDPTF)
-				CreateThread(NULL, 0, DPTFInit, fan_conf, 0, NULL);
-		}
-		else {
+		if (!(conf->fanControl = mon->acpi->isSupported)) {
 			delete mon;
 			mon = NULL;
+			//if (fan_conf->needDPTF)
+			//	CreateThread(NULL, 0, DPTFInit, fan_conf, 0, NULL);
 		}
 	}
 	return conf->fanControl;
@@ -79,7 +82,10 @@ bool DetectFans() {
 
 void SetHotkeys() {
 	RegisterHotKey(mDlg, 1, 0, VK_F18);
-	RegisterHotKey(mDlg, 2, 0, VK_F17);
+	if (conf->fanControl)
+		RegisterHotKey(mDlg, 2, 0, VK_F17);
+	else
+		UnregisterHotKey(mDlg, 2);
 
 	if (conf->keyShortcuts) {
 		//register global hotkeys...
@@ -108,18 +114,17 @@ void SetHotkeys() {
 	}
 }
 
-void FillAllDevs() {
-	fxhl->Stop();
-	conf->afx_dev.AlienFXAssignDevices(false, mon ? mon->acpi : NULL);
-	if (conf->afx_dev.activeDevices) {
-		fxhl->Start();
-		fxhl->SetState(true);
-		fxhl->UpdateGlobalEffect(NULL);
-		fxhl->Refresh(true);
-	}
-}
+void OnSelChanged();
+void UpdateProfileList();
 
-void SelectProfile(profile* prof = conf->activeProfile);
+void SelectProfile(profile* prof = conf->activeProfile) {
+	if (!dDlg) {
+		eve->SwitchActiveProfile(prof);
+		if (tabSel == TAB_FANS || tabSel == TAB_LIGHTS)
+			OnSelChanged();
+	}
+	UpdateProfileList();
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -148,7 +153,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	if (conf->esif_temp || conf->fanControl || conf->awcc_disable)
 		if (EvaluteToAdmin()) {
-			conf->wasAWCC = DoStopService(conf->awcc_disable, true);
+			wasAWCC = DoStopAWCC(conf->awcc_disable, true);
 			DetectFans();
 		}
 		else {
@@ -156,13 +161,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		}
 
 	fxhl = new FXHelper();
-	FillAllDevs();
+	fxhl->FillAllDevs();
 	eve = new EventHandler();
 
 	if (CreateDialog(hInstance, MAKEINTRESOURCE(IDD_MAINWINDOW), NULL, (DLGPROC)MainDialog)) {
 
 		SendMessage(mDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ALIENFXGUI)));
-		SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ALIENFXGUI), IMAGE_ICON, 16, 16, 0));
+		SendMessage(mDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadImage(hInst, MAKEINTRESOURCE(IDI_ALIENFXGUI), IMAGE_ICON, 16, 16, 0));
 
 		SetHotkeys();
 		// Power notifications...
@@ -189,11 +194,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	eve->StopProfiles();
 	eve->ChangeEffects(true);
+	eve->ChangeAction(false);
 	fxhl->Refresh(true);
 	delete fxhl;
 	delete eve;
 
-	DoStopService(conf->wasAWCC, false);
+	DoStopAWCC(wasAWCC, false);
 
 	if (mon) {
 		delete mon;
@@ -204,50 +210,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	return 0;
 }
 
-void RedrawButton(HWND ctrl, AlienFX_SDK::Afx_colorcode* act) {
+void RedrawButton(HWND ctrl, DWORD act) {
 	RECT rect;
-	HBRUSH Brush = act ? CreateSolidBrush(RGB(act->r, act->g, act->b)) : CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+	HBRUSH Brush = CreateSolidBrush(act & 0xff000000 ? GetSysColor(COLOR_BTNFACE) : act);
 	GetClientRect(ctrl, &rect);
 	HDC cnt = GetWindowDC(ctrl);
 	FillRect(cnt, &rect, Brush);
 	DrawEdge(cnt, &rect, EDGE_RAISED, BF_RECT);
 	DeleteObject(Brush);
 	ReleaseDC(ctrl, cnt);
-}
-
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	UNREFERENCED_PARAMETER(lParam);
-	switch (message)
-	{
-	case WM_INITDIALOG: {
-		SetDlgItemText(hDlg, IDC_STATIC_VERSION, ("Version: " + GetAppVersion()).c_str());
-		return (INT_PTR)TRUE;
-	} break;
-	case WM_COMMAND:
-		switch (LOWORD(wParam)) {
-		case IDOK: case IDCANCEL:
-		{
-			EndDialog(hDlg, LOWORD(wParam));
-			return (INT_PTR)TRUE;
-		} break;
-		}
-		break;
-	case WM_NOTIFY:
-		switch (LOWORD(wParam)) {
-		case IDC_SYSLINK_HOMEPAGE:
-			switch (((LPNMHDR)lParam)->code)
-			{
-			case NM_CLICK:
-			case NM_RETURN:
-			{
-				ShellExecute(NULL, "open", "https://github.com/T-Troll/alienfx-tools", NULL, NULL, SW_SHOWNORMAL);
-			} break;
-			} break;
-		}
-		break;
-	}
-	return (INT_PTR)FALSE;
 }
 
 void ResizeTab(HWND tab) {
@@ -301,26 +272,17 @@ void UpdateProfileList() {
 			if (prof->id == conf->activeProfile->id) {
 				ComboBox_SetCurSel(profile_list, id);
 				CheckDlgButton(mDlg, IDC_PROFILE_EFFECTS, conf->activeProfile->effmode);
+				EnableWindow(GetDlgItem(mDlg, IDC_PROFILE_EFFECTS), conf->enableEffects);
 			}
 		}
 		//DebugPrint("Profile list reloaded.\n");
 	}
 }
 
-void SelectProfile(profile* prof) {
-	if (!dDlg) {
-		eve->SwitchActiveProfile(prof);
-		if (tabSel == TAB_FANS || tabSel == TAB_LIGHTS)
-			OnSelChanged();
-	}
-	UpdateProfileList();
-}
-
 void UpdateState(bool checkMode = false) {
 	if (!dDlg)
 		eve->ChangeEffectMode();
-	//else
-	//	fxhl->SetState();
+
 	if (checkMode) {
 		CheckDlgButton(mDlg, IDC_PROFILE_EFFECTS, conf->activeProfile->effmode);
 		if (!dDlg && tabSel == TAB_LIGHTS)
@@ -351,17 +313,15 @@ void ClearOldTabs(HWND tab) {
 	}
 }
 
-void CreateTabControl(HWND parent, vector<string> names, vector<DWORD> resID, vector<DLGPROC> func) {
+void CreateTabControl(HWND parent, int tabsize, const char* names[], const DWORD* resID, const DLGPROC* func) {
 
 	ClearOldTabs(parent);
 
-	DLGHDR* pHdr = new DLGHDR{ 0 };// (DLGHDR*)LocalAlloc(LPTR, sizeof(DLGHDR));
+	DLGHDR* pHdr = new DLGHDR{ 0 };
 	SetWindowLongPtr(parent, GWLP_USERDATA, (LONG_PTR)pHdr);
 
-	int tabsize = (int)names.size();
-
-	pHdr->apRes = new DLGTEMPLATE*[tabsize];// (DLGTEMPLATE**)LocalAlloc(LPTR, tabsize * sizeof(DLGTEMPLATE*));
-	pHdr->apProc = new DLGPROC[tabsize];// (DLGPROC*)LocalAlloc(LPTR, tabsize * sizeof(DLGPROC));
+	pHdr->apRes = new DLGTEMPLATE*[tabsize];
+	pHdr->apProc = new DLGPROC[tabsize];
 
 	TCITEM tie{ TCIF_TEXT | TCIF_PARAM };
 
@@ -373,7 +333,7 @@ void CreateTabControl(HWND parent, vector<string> names, vector<DWORD> resID, ve
 			case 1: if (!mon) continue;
 			}
 		pHdr->apRes[i] = (DLGTEMPLATE*)LockResource(LoadResource(hInst, FindResource(NULL, MAKEINTRESOURCE(resID[i]), RT_DIALOG)));
-		tie.pszText = (LPSTR)names[i].c_str();
+		tie.pszText = (LPSTR)names[i]/*.c_str()*/;
 		tie.lParam = i;
 		pHdr->apProc[i] = func[i];
 		int pos = TabCtrl_InsertItem(parent, i, (LPARAM)&tie);
@@ -382,12 +342,12 @@ void CreateTabControl(HWND parent, vector<string> names, vector<DWORD> resID, ve
 	}
 }
 
+const char* mainTabs[] = { "灯光", "风扇和性能", "预设", "设置" };
+const DWORD resTabs[] = { IDD_DIALOG_LIGHTS, IDD_DIALOG_FAN, IDD_DIALOG_PROFILES, IDD_DIALOG_SETTINGS };
+const DLGPROC procTabs[] = { (DLGPROC)TabLightsDialog, (DLGPROC)TabFanDialog, (DLGPROC)TabProfilesDialog, (DLGPROC)TabSettingsDialog };
+
 void SetMainTabs() {
-	CreateTabControl(GetDlgItem(mDlg, IDC_TAB_MAIN),
-		{ "灯光", "风扇和性能", "预设", "设置" },
-		{ IDD_DIALOG_LIGHTS, IDD_DIALOG_FAN, IDD_DIALOG_PROFILES, IDD_DIALOG_SETTINGS },
-		{ (DLGPROC)TabLightsDialog, (DLGPROC)TabFanDialog, (DLGPROC)TabProfilesDialog, (DLGPROC)TabSettingsDialog }
-	);
+	CreateTabControl(GetDlgItem(mDlg, IDC_TAB_MAIN), 4, mainTabs, resTabs, procTabs);
 	OnSelChanged();
 }
 
@@ -395,6 +355,7 @@ void PauseSystem() {
 	conf->Save();
 	eve->StopProfiles();
 	eve->ChangeEffects(true);
+	eve->ChangeAction(false);
 	fxhl->Refresh(true);
 	fxhl->Stop();
 	if (mon)
@@ -406,8 +367,9 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 		profile_list = GetDlgItem(hDlg, IDC_PROFILES);
 
 	// Started/restarted explorer...
-	if (message == newTaskBar && AddTrayIcon(&conf->niData, conf->updateCheck)) {
-		conf->SetIconState();
+	if (message == newTaskBar) {
+		conf->SetIconState(conf->updateCheck);
+		return true;
 	}
 
 	switch (message)
@@ -415,11 +377,9 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 	case WM_INITDIALOG:
 	{
 		conf->niData.hWnd = mDlg = hDlg;
-		while (!AddTrayIcon(&conf->niData, conf->updateCheck))
-			Sleep(50);
-		conf->SetIconState();
+		while (!conf->SetIconState(conf->updateCheck))
+			Sleep(100);
 		SetMainTabs();
-		UpdateProfileList();
 	} break;
 	case WM_COMMAND:
 	{
@@ -584,13 +544,14 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 					+ (eve->grid ? "G" : "g"));
 			}
 			if (mon) {
-				name.append(string("\n") + (fan_conf->lastProf->gmodeStage ? "G-mode" : *fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage])) + " power");
+				name.append(string("\n") + (fan_conf->lastProf->gmodeStage ? "G-mode" : *fan_conf->GetPowerName(mon->acpi->powers[fan_conf->lastProf->powerStage])));
 				for (int i = 0; i < mon->fansize; i++) {
 					name.append("\n" + GetFanName(i, true));
 				}
 			}
-			conf->niData.szTip[127] = 0;
-			strcpy_s(conf->niData.szTip, min(127, name.length() + 1), name.c_str());
+			//conf->niData.szTip[127] = 0;
+			strcpy_s(conf->niData.szTip, min(128, name.length() + 1), name.c_str());
+			//conf->niData.uFlags = NIF_TIP | NIF_SHOWTIP;
 			Shell_NotifyIcon(NIM_MODIFY, &conf->niData);
 		} break;
 		}
@@ -638,19 +599,18 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			if (mon)
 				mon->Start();
 			fxhl->Start();
-			fxhl->stateScreen = true; // patch for later StateScreen update
-			//fxhl->SetState(true);
-			eve->ChangeEffectMode();
+			fxhl->SetState(true);
+			//eve->ChangeEffectMode();
+			conf->SetIconState(conf->updateCheck);
 			eve->StartProfiles();
-			if (conf->updateCheck) {
-				needUpdateFeedback = false;
-				CreateThread(NULL, 0, CUpdateCheck, &conf->niData, 0, NULL);
-			}
+			eve->ChangeAction();
 		} break;
 		case PBT_APMPOWERSTATUSCHANGE:
 			// ac/batt change
 			DebugPrint("Power source change initiated\n");
 			eve->ChangePowerState();
+			if (tabSel == TAB_FANS)
+				OnSelChanged();
 			break;
 		case PBT_POWERSETTINGCHANGE: {
 			if (conf->offWithScreen &&
@@ -661,7 +621,7 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				// react state change state
 				fxhl->stateScreen = ((POWERBROADCAST_SETTING*)lParam)->Data[0] > 0;
 				fxhl->stateDim = ((POWERBROADCAST_SETTING*)lParam)->Data[0] == 2;
-				DebugPrint("Screen state " + to_string(((POWERBROADCAST_SETTING*)lParam)->Data[0]) + "\n");
+				DebugPrint("Screen state changed to " + to_string(((POWERBROADCAST_SETTING*)lParam)->Data[0]) + "\n");
 				eve->ChangeEffectMode();
 			}
 		} break;
@@ -671,21 +631,24 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			break;
 		}
 		break;
-	//case WM_SYSCOLORCHANGE: case WM_SETTINGCHANGE:
-	//	DebugPrint("Device config changed!\n");
-	//	break;
+	case WM_SETTINGCHANGE: {
+		// Get accent color
+		DWORD acc = conf->GetAccentColor();
+		if (acc != conf->accentColor) {
+			conf->accentColor = acc;
+			fxhl->Refresh();
+		}
+		} break;
 	case WM_DEVICECHANGE:
 		if (wParam == DBT_DEVNODES_CHANGED) {
 			DebugPrint("Device list changed \n");
-			vector<AlienFX_SDK::Functions*> devList = conf->afx_dev.AlienFXEnumDevices(mon ? mon->acpi : NULL);
-			if (devList.size() != conf->afx_dev.activeDevices) {
+			if (conf->afx_dev.AlienFXEnumDevices(mon ? mon->acpi : NULL)) {
 				DebugPrint("Active device list changed!\n");
-				fxhl->Stop();
-				conf->afx_dev.AlienFXApplyDevices(false, devList);
-				activeDevice = NULL;
+				//fxhl->QueryUpdate();
+				conf->afx_dev.AlienFXApplyDevices();
 				if (conf->afx_dev.activeDevices && !dDlg) {
-					fxhl->Start();
 					fxhl->SetState(true);
+					fxhl->UpdateGlobalEffect(NULL);
 					fxhl->Refresh();
 				}
 				SetMainTabs();
@@ -695,15 +658,14 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 	case WM_DISPLAYCHANGE:
 		// Monitor configuration changed
 		DebugPrint("Display config changed!\n");
-	    dxgi_Restart();
+		dxgi_Restart();
+		//ChangeDisplaySettings() - ToDo - change freqs using it.
 		break;
 	case WM_ENDSESSION:
 		// Shutdown/restart scheduled....
 		DebugPrint("Shutdown initiated\n");
 		PauseSystem();
-		//if (mon)
-		//	delete mon;
-		exit(0);
+		break;
 	case WM_HOTKEY:
 		if (wParam > 9 && wParam - 11 <= conf->profiles.size()) { // Profile switch
 			SelectProfile(wParam == 10 ? conf->FindDefaultProfile() : conf->profiles[wParam - 11]);
@@ -713,7 +675,8 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 			mon->SetPowerMode((WORD)wParam - 30);
 			if (tabSel == TAB_FANS)
 				OnSelChanged();
-			BlinkNumLock((int)wParam - 29);
+			BlinkNumLock(mon->powerMode);
+			ShowNotification(&conf->niData, "Power mode switched!", "New power mode - " + *fan_conf->GetPowerName(mon->acpi->powers[mon->powerMode]));
 			break;
 		}
 		switch (wParam) {
@@ -752,6 +715,8 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 				AlterGMode(NULL);
 				if (tabSel == TAB_FANS)
 					OnSelChanged();
+				BlinkNumLock(mon->powerMode);
+				ShowNotification(&conf->niData, "Power mode switched!", "New power mode - " + (fan_conf->lastProf->gmodeStage ? "G-mode" : * fan_conf->GetPowerName(mon->acpi->powers[mon->powerMode])));
 			}
 			break;
 		case 7: case 8: // Brightness up/down
@@ -775,12 +740,9 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 		break;
 	case WM_CLOSE:
 		SendMessage(hDlg, WM_SIZE, SIZE_MINIMIZED, 0);
-		//DestroyWindow(hDlg);
 		break;
 	case WM_DESTROY:
 		Shell_NotifyIcon(NIM_DELETE, &conf->niData);
-		conf->Save();
-		mDlg = NULL;
 		PostQuitMessage(0);
 		break;
 	default: return false;
@@ -788,23 +750,20 @@ BOOL CALLBACK MainDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 	return true;
 }
 
+DWORD MakeRGB(AlienFX_SDK::Afx_colorcode c) {
+	return RGB(c.r, c.g, c.b);
+}
+
+DWORD MakeRGB(AlienFX_SDK::Afx_action* act) {
+	return RGB(act->r, act->g, act->b);
+}
 
 AlienFX_SDK::Afx_colorcode Act2Code(AlienFX_SDK::Afx_action *act) {
-	AlienFX_SDK::Afx_colorcode c = { act->b, act->g, act->r };
-	return c;
+	return AlienFX_SDK::Afx_colorcode({ act->b, act->g, act->r });
 }
 
-AlienFX_SDK::Afx_action Code2Act(AlienFX_SDK::Afx_colorcode *c) {
-	AlienFX_SDK::Afx_action a{ 0,0,0,c->r,c->g,c->b };
-	return a;
-}
-
-void CColorRefreshProc(LPVOID param) {
-	AlienFX_SDK::Afx_action* lastcolor = (AlienFX_SDK::Afx_action*)param;
-	if (memcmp(lastcolor, mod, sizeof(AlienFX_SDK::Afx_action))) {
-		*lastcolor = *mod;
-		if (mmap) fxhl->RefreshOne(mmap);
-	}
+AlienFX_SDK::Afx_action Code2Act(AlienFX_SDK::Afx_colorcode c) {
+	return AlienFX_SDK::Afx_action({ 0,0,0,c.r,c.g,c.b });
 }
 
 UINT_PTR Lpcchookproc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -813,92 +772,46 @@ UINT_PTR Lpcchookproc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 		mod->r = GetDlgItemInt(hDlg, COLOR_RED, NULL, false);
 		mod->g = GetDlgItemInt(hDlg, COLOR_GREEN, NULL, false);
 		mod->b = GetDlgItemInt(hDlg, COLOR_BLUE, NULL, false);
+		if (needColorUpdate && mmap && memcmp(&lastColor, mod, sizeof(AlienFX_SDK::Afx_action))) {
+			memcpy(&lastColor, mod, sizeof(AlienFX_SDK::Afx_action));
+			fxhl->RefreshZone(mmap);
+		}
 	}
 	return 0;
 }
 
 bool SetColor(HWND ctrl, AlienFX_SDK::Afx_action* map, bool needUpdate = true) {
-	CHOOSECOLOR cc{ sizeof(cc), ctrl, NULL, RGB(map->r, map->g, map->b), (LPDWORD)conf->customColors,
-		CC_FULLOPEN | CC_RGBINIT | CC_ANYCOLOR | CC_ENABLEHOOK, NULL/*(LPARAM)map*/, Lpcchookproc };
+	CHOOSECOLOR cc{ sizeof(cc), ctrl, NULL, MakeRGB(map), (LPDWORD)conf->customColors,
+		CC_FULLOPEN | CC_RGBINIT | CC_ANYCOLOR | CC_ENABLEHOOK, NULL, Lpcchookproc };
+	// Let's change CC 15 to accent color
+	conf->customColors[15] = conf->accentColor;
 
 	bool ret;
-	AlienFX_SDK::Afx_action savedColor = *map, lastcolor = *map;
+	AlienFX_SDK::Afx_action savedColor = *map;
+	lastColor = savedColor;
 	mod = map;
-	ThreadHelper* colorUpdate = NULL;
+	needColorUpdate = needUpdate;
 
-	if (needUpdate)
-		colorUpdate = new ThreadHelper(CColorRefreshProc, &lastcolor, 200);
-
-	if (!(ret = ChooseColor(&cc)))
+	if (!(ret = ChooseColor(&cc))) {
 		(*map) = savedColor;
-
-	if (needUpdate) {
-		delete colorUpdate;
-		fxhl->Refresh();
+		if (needUpdate && mmap)
+			fxhl->RefreshZone(mmap);
 	}
-	RedrawButton(ctrl, &Act2Code(map));
+
+	RedrawButton(ctrl, MakeRGB(map));
 	return ret;
 }
 
-bool SetColor(HWND ctrl, AlienFX_SDK::Afx_colorcode *clr) {
+bool SetColor(HWND ctrl, AlienFX_SDK::Afx_colorcode& clr) {
 	bool ret;
 	AlienFX_SDK::Afx_action savedColor = Code2Act(clr);
 	if (ret = SetColor(ctrl, &savedColor, false))
-		*clr = Act2Code(&savedColor);
+		clr = Act2Code(&savedColor);
 	return ret;
 }
 
-bool IsLightInGroup(DWORD lgh, AlienFX_SDK::Afx_group* grp) {
-	if (grp)
-		for (auto pos = grp->lights.begin(); pos < grp->lights.end(); pos++)
-			if (pos->lgh == lgh)
-				return true;
-	return false;
-}
 
-bool IsGroupUnused(DWORD gid) {
-	for (auto prof = conf->profiles.begin(); prof != conf->profiles.end(); prof++) {
-		for (auto ls = (*prof)->lightsets.begin(); ls != (*prof)->lightsets.end(); ls++)
-			if (ls->group == gid) {
-				return false;
-			}
-	}
-	return true;
-}
 
-void RemoveUnusedGroups() {
-	for (auto i = conf->afx_dev.GetGroups()->begin(); i != conf->afx_dev.GetGroups()->end();)
-		if (IsGroupUnused(i->gid)) {
-			i = conf->afx_dev.GetGroups()->erase(i);
-		}
-		else
-			i++;
-}
 
-void RemoveLightFromGroup(AlienFX_SDK::Afx_group* grp, AlienFX_SDK::Afx_groupLight lgh) {
-	for (auto pos = grp->lights.begin(); pos != grp->lights.end(); pos++)
-		if (pos->lgh == lgh.lgh) {
-			grp->lights.erase(pos);
-			break;
-		}
-}
-
-void RemoveLightAndClean() {
-	// delete from all groups...
-	for (auto iter = conf->afx_dev.GetGroups()->begin(); iter < conf->afx_dev.GetGroups()->end(); iter++) {
-		for (auto lgh = iter->lights.begin(); lgh != iter->lights.end();)
-			if (lgh->did == activeDevice->pid && !conf->afx_dev.GetMappingByDev(activeDevice, lgh->lid)) {
-				// Clean from grids...
-				for (auto g = conf->afx_dev.GetGrids()->begin(); g < conf->afx_dev.GetGrids()->end(); g++) {
-					for (int ind = 0; ind < g->x * g->y; ind++)
-						if (g->grid[ind].lgh == lgh->lgh)
-							g->grid[ind].lgh = 0;
-				}
-				lgh = iter->lights.erase(lgh);
-			}
-			else
-				lgh++;
-	}
-}
 
 

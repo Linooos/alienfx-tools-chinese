@@ -23,13 +23,16 @@ extern string GetFanName(int ind, bool forTray = false);
 extern HANDLE ocStopEvent;
 extern void DrawFan();
 
+const char* pModes[] = { "关闭睿频", "启用睿频", "性能", "高效", "高效性能", "" };
+
 BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     HWND power_list = GetDlgItem(hDlg, IDC_COMBO_POWER),
         tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC),
         xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP),
         tempList = GetDlgItem(hDlg, IDC_TEMP_LIST),
-        fanList = GetDlgItem(hDlg, IDC_FAN_LIST);
+        fanList = GetDlgItem(hDlg, IDC_FAN_LIST),
+        tcc_edit = GetDlgItem(hDlg, IDC_EDIT_TCC);
 
     switch (message) {
     case WM_INITDIALOG:
@@ -43,7 +46,7 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         PowerReadACValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &acMode);
         PowerReadDCValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &dcMode);
 
-        vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
+        //vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
         UpdateCombo(GetDlgItem(hDlg, IDC_AC_BOOST), pModes, acMode);
         UpdateCombo(GetDlgItem(hDlg, IDC_DC_BOOST), pModes, dcMode);;
 
@@ -56,18 +59,22 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         tipWindow = GetDlgItem(hDlg, IDC_FC_LABEL);
 
         // Set SystemID
-        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string(mon->systemID)).c_str());
+        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string((unsigned int)mon->systemID)).c_str());
 
         // Start UI update thread...
         SetTimer(hDlg, 0, fan_conf->pollingRate, NULL);
 
         // OC block
         EnableWindow(tcc_slider, fan_conf->ocEnable && mon->acpi->isTcc);
+        EnableWindow(tcc_edit, fan_conf->ocEnable && mon->acpi->isTcc);
         if (fan_conf->ocEnable && mon->acpi->isTcc) {
             SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
             sTip1 = CreateToolTip(tcc_slider, sTip1);
             SetSlider(sTip1, fan_conf->lastProf->currentTCC);
             SendMessage(tcc_slider, TBM_SETPOS, true, fan_conf->lastProf->currentTCC);
+
+            // Set edit box value to match slider
+			SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
         }
         EnableWindow(xmp_slider, fan_conf->ocEnable && mon->acpi->isXMP);
         if (fan_conf->ocEnable && mon->acpi->isXMP) {
@@ -120,8 +127,7 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         } break;
         case IDC_FAN_RESET:
         {
-            if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "确定清除所有温度曲线？", "警告！！！",
-                MB_YESNO | MB_ICONWARNING) == IDYES) {
+            if (WarningBox(hDlg, "确定清除所有温度曲线？")) {
                 fan_conf->lastProf->fanControls[fan_conf->lastSelectedFan].clear();
                 ReloadTempView(tempList);
             }
@@ -140,9 +146,27 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             break;
         case IDC_BUT_RESETBOOST:
             if (mon->inControl)
-                fan_conf->boosts[fan_conf->lastSelectedFan] = { 100, (unsigned short)mon->acpi->GetMaxRPM(fan_conf->lastSelectedFan) };
+                fan_conf->boosts[fan_conf->lastSelectedFan].maxBoost = 100;
             break;
         }
+        case IDC_EDIT_TCC:
+            switch (HIWORD(wParam)) {
+            case EN_CHANGE: {
+                // Doesn't need to check success, 0 will be out of range and not changed
+                int val = GetDlgItemInt(hDlg, IDC_EDIT_TCC, NULL, FALSE);
+                // Did it in range?
+                if (val && val == max(min(val, mon->acpi->maxTCC), mon->acpi->maxTCC - mon->acpi->maxOffset)) {
+                    // Set slider and value
+                    SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
+                    SetSlider(sTip1, val);
+                    mon->SetOC();
+                }
+            } break;
+            case EN_KILLFOCUS:
+                // Just set resulted value
+                SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+                break;
+            } break;
     } break;
     case WM_APP + 2:
         EnableWindow(power_list, (bool)lParam);
@@ -163,26 +187,31 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             if ((HWND)lParam == tcc_slider) {
                 fan_conf->lastProf->currentTCC = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip1, fan_conf->lastProf->currentTCC);
-                mon->acpi->SetTCC(fan_conf->lastProf->currentTCC);
+                // Update edit box
+				SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+                mon->SetOC();
             }
             if ((HWND)lParam == xmp_slider) {
                 fan_conf->lastProf->memoryXMP = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-                mon->acpi->SetXMP(fan_conf->lastProf->memoryXMP);
+                mon->SetOC();
             }
         } break;
         } break;
     case WM_TIMER:
-        for (int i = 0; i < mon->sensorSize; i++) {
-            string name = to_string(mon->senValues[mon->acpi->sensors[i].sid]) + " (" + to_string(mon->maxTemps[mon->acpi->sensors[i].sid]) + ")";
-            ListView_SetItemText(tempList, i, 0, (LPSTR)name.c_str());
-            name = fan_conf->GetSensorName(&mon->acpi->sensors[i]);
-            ListView_SetItemText(tempList, i, 1, (LPSTR)name.c_str());
+        if (mon->modified) {
+            for (int i = 0; i < mon->sensorSize; i++) {
+                WORD sid = mon->acpi->sensors[i].sid;
+                string name = to_string(mon->senValues[sid]) + " (" + to_string(mon->maxTemps[sid]) + ")";
+                ListView_SetItemText(tempList, i, 0, (LPSTR)name.c_str());
+                name = fan_conf->GetSensorName(&mon->acpi->sensors[i]);
+                ListView_SetItemText(tempList, i, 1, (LPSTR)name.c_str());
+            }
+            RECT cArea;
+            GetClientRect(tempList, &cArea);
+            ListView_SetColumnWidth(tempList, 0, LVSCW_AUTOSIZE);
+            ListView_SetColumnWidth(tempList, 1, cArea.right - ListView_GetColumnWidth(tempList, 0));
         }
-        RECT cArea;
-        GetClientRect(tempList, &cArea);
-        ListView_SetColumnWidth(tempList, 0, LVSCW_AUTOSIZE);
-        ListView_SetColumnWidth(tempList, 1, cArea.right - ListView_GetColumnWidth(tempList, 0));
         for (int i = 0; i < mon->fansize; i++) {
             string name = GetFanName(i);
             ListView_SetItemText(fanList, i, 0, (LPSTR)name.c_str());

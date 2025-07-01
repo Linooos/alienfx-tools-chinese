@@ -4,9 +4,8 @@
 extern HWND CreateToolTip(HWND hwndParent, HWND oldTip);
 extern void SetSlider(HWND tt, int value);
 extern AlienFX_SDK::Afx_colorcode Act2Code(AlienFX_SDK::Afx_action* act);
+extern DWORD MakeRGB(AlienFX_SDK::Afx_colorcode c);
 extern void UpdateZoneList();
-extern bool IsLightInGroup(DWORD lgh, AlienFX_SDK::Afx_group* grp);
-extern void RemoveLightFromGroup(AlienFX_SDK::Afx_group* grp, AlienFX_SDK::Afx_groupLight lgh);
 
 extern void SetLightInfo();
 extern void RedrawDevList();
@@ -65,7 +64,7 @@ void InitGridButtonZone() {
                 conf->mainGrid->grid[ind(x, y)].lgh == conf->mainGrid->grid[ind(x + size, y)].lgh) size++;
             HWND btn = CreateWindow("BUTTON", "", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | WS_DISABLED,
                 buttonZone.left + x * buttonZone.right, buttonZone.top + y * buttonZone.bottom, size * buttonZone.right, buttonZone.bottom, cgDlg, (HMENU)bId++,
-                GetModuleHandle(NULL), NULL);
+                hInst, NULL);
             SetWindowLongPtr(btn, GWLP_USERDATA, (LONG_PTR)(ind(x,y)));
             x+=size-1;
         }
@@ -103,9 +102,9 @@ void RecalcGridZone(RECT* what = NULL) {
         for (int y = full.top; y < full.bottom; y++) {
             int ind = ind(x, y);
             colorGrid[ind].first.br = colorGrid[ind].last.br = 0xff;
-            conf->modifyProfile.lock();
+            conf->modifyProfile.lockRead();
             for (auto cs = conf->activeProfile->lightsets.rbegin(); cs != conf->activeProfile->lightsets.rend(); cs++)
-                if ((grp = conf->FindCreateGroup(cs->group)) && IsLightInGroup(conf->mainGrid->grid[ind].lgh, grp)) {
+                if ((grp = conf->FindCreateGroup(cs->group)) && conf->IsLightInGroup(conf->mainGrid->grid[ind].lgh, grp)) {
                     if (conf->stateEffects) {
                         if (cs->events.size()) {
                             if (colorGrid[ind].first.br == 0xff && !(cs->fromColor && cs->color.size()))
@@ -133,7 +132,7 @@ void RecalcGridZone(RECT* what = NULL) {
                             colorGrid[ind].last = Act2Code(&cs->color.back());
                     }
                 }
-            conf->modifyProfile.unlock();
+            conf->modifyProfile.unlockRead();
         }
 }
 
@@ -179,7 +178,7 @@ void ModifyColorDragZone(bool clear = false) {
             for (int y = dragZone.top; y < dragZone.bottom; y++) {
                 int ind = ind(x, y);
                 if (conf->mainGrid->grid[ind].lgh) {
-                    if (IsLightInGroup(conf->mainGrid->grid[ind].lgh, grp))
+                    if (conf->IsLightInGroup(conf->mainGrid->grid[ind].lgh, grp))
                         markRemove.push_back(conf->mainGrid->grid[ind]);
                     else
                         if (!clear)
@@ -188,13 +187,17 @@ void ModifyColorDragZone(bool clear = false) {
             }
         // now clear by remove list and add new...
         for (auto tr = markRemove.begin(); tr < markRemove.end(); tr++) {
-            RemoveLightFromGroup(grp, *tr);
+            //RemoveLightFromGroup(grp, *tr);
+            for (auto pos = grp->lights.begin(); pos != grp->lights.end(); pos++)
+                if (pos->lgh == tr->lgh) {
+                    grp->lights.erase(pos);
+                    break;
+                }
         }
         for (auto tr = markAdd.begin(); tr < markAdd.end(); tr++) {
-            if (!IsLightInGroup(tr->lgh, grp))
+            if (!conf->IsLightInGroup(tr->lgh, grp))
                 grp->lights.push_back(*tr);
         }
-        //RedrawZoneGrid(grp->gid, false, true);
         conf->FindZoneMap(grp->gid, true);
         RecalcGridZone();
         UpdateZoneList();
@@ -230,16 +233,6 @@ BOOL CALLBACK TabGrid(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	case WM_INITDIALOG:
 	{
         cgDlg = hDlg;
-        //if (tabLightSel != TAB_DEVICES) {
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTADDTOP), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTREMTOP), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTADDBOT), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTREMBOT), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTADDLEFT), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTREMLEFT), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTADDRGH), SW_HIDE);
-        //    ShowWindow(GetDlgItem(hDlg, IDC_BUTREMRGH), SW_HIDE);
-        //}
         RepaintGrid();
 	} break;
     case WM_COMMAND: {
@@ -359,7 +352,7 @@ BOOL CALLBACK TabGrid(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
             if (gridVal) {
                 if (tabLightSel == TAB_DEVICES) {
                     HBRUSH Brush = CreateSolidBrush(gridVal == MAKELPARAM(activeDevice->pid, eLid) ?
-                        RGB(conf->testColor.r, conf->testColor.g, conf->testColor.b) :
+                        MakeRGB(conf->testColor) :
                         RGB(0xff - (HIWORD(gridVal) << 5), LOWORD(gridVal), HIWORD(gridVal) << 1));
                     FillRect(wDC, &ditem->rcItem, Brush);
                     DeleteObject(Brush);
@@ -384,7 +377,7 @@ BOOL CALLBACK TabGrid(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
                         FillRect(wDC, &ditem->rcItem, Brush);
                         DeleteObject(Brush);
                     }
-                    if (mmap && IsLightInGroup(gridVal, conf->afx_dev.GetGroupById(eItem))) {
+                    if (mmap && conf->IsLightInGroup(gridVal, conf->afx_dev.GetGroupById(eItem))) {
                         for (int cx = 0; cx < size; cx++) {
                             rectClip.right = rectClip.left + buttonZone.right;
                             int border = (cx == 0 * BF_LEFT) |
@@ -429,7 +422,6 @@ void CreateGridBlock(HWND gridTab, DLGPROC func, bool needAddDel) {
     TCITEM tie{ TCIF_TEXT };
 
     TabCtrl_DeleteAllItems(gridTab);
-
     GetClientRect(gridTab, &rcDisplay);
 
     rcDisplay.left = GetSystemMetrics(SM_CXBORDER);
@@ -453,8 +445,8 @@ void CreateGridBlock(HWND gridTab, DLGPROC func, bool needAddDel) {
     TabCtrl_SetMinTabWidth(gridTab, 10);
 
     if (!GetWindowLongPtr(gridTab, GWLP_USERDATA)) {
-        HWND hwndDisplay = CreateDialogIndirect(GetModuleHandle(NULL),
-            (DLGTEMPLATE*)LockResource(LoadResource(GetModuleHandle(NULL), FindResource(NULL, 
+        HWND hwndDisplay = CreateDialogIndirect(hInst,
+            (DLGTEMPLATE*)LockResource(LoadResource(hInst, FindResource(NULL, 
                 MAKEINTRESOURCE(needAddDel ? IDD_GRIDBLOCK : IDD_GRIDBLOCK_SIMPLE), RT_DIALOG))),
             gridTab, func);
 

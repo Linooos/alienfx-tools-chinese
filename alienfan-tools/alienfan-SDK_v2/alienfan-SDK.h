@@ -40,13 +40,13 @@ namespace AlienFan_SDK {
 
 	class Control {
 	private:
-		DWORD systemID = 0;
-		byte sysType = -1;
+		DWORD systemID;
+		byte sysType;
 		void EnumSensors(IWbemServices* srv, const wchar_t* sname, byte type);
 	public:
 		VARIANT m_instancePath{};
 		IWbemServices* m_WbemServices = NULL, * m_OHMService = NULL, * m_DiskService = NULL;
-		IWbemClassObject* m_InParamaters = NULL;
+		IWbemClassObject* m_InParamaters;
 		bool isAlienware = false,
 			isSupported = false,
 			isTcc = false,
@@ -59,7 +59,7 @@ namespace AlienFan_SDK {
 
 		// Probe hardware, sensors, fans, power modes and fill structures.
 		// Result: true - compatible hardware found, false - not found.
-		bool Probe();
+		bool Probe(bool diskSensors);
 
 		// Get RPM for the fan index fanID at fans[]
 		// Result: fan RPM

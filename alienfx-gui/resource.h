@@ -130,22 +130,15 @@
 #define IDC_FC_LABEL                    1123
 #define IDC_AC_BOOST                    1124
 #define IDC_DC_BOOST                    1125
-#define IDC_VAL_CPU                     1126
-#define IDC_VAL_RAM                     1127
+#define IDC_VAL_USAGE                   1126
 #define IDC_CHECK_UPDATE                1127
-#define IDC_VAL_GPU                     1128
 #define IDC_BUTTON_ZONE                 1128
-#define IDC_VAL_PWR                     1129
 #define IDC_SLIDER_HSCALE               1129
-#define IDC_VAL_FAN                     1130
 #define IDC_SLIDER_VSCALE               1130
 #define IDC_BUT_COPYACTIVE              1130
 #define IDC_BUT_OVER                    1130
-#define IDC_VAL_NET                     1131
 #define IDC_OFFONBATTERY                1131
-#define IDC_VAL_BAT                     1132
 #define IDC_FAN_RESET                   1132
-#define IDC_VAL_TEMP                    1133
 #define IDC_TAB_LIGHTS                  1133
 #define IDC_TAB_DEV_GRID                1135
 #define IDC_BUT_FIRST                   1137
@@ -173,7 +166,6 @@
 #define IDC_BUT_WHITE                   1158
 #define IDC_CP_TRIGGERS                 1158
 #define IDC_CHECK_REVERSE               1159
-#define IDC_CP_TRIGGERS2                1159
 #define IDC_CP_APPS                     1159
 #define IDC_CHECK_LIGHTNAMES            1161
 #define IDC_TRIGGER_POWER_AC            1163
@@ -217,15 +209,19 @@
 #define IDC_CMODE_KEY                   1210
 #define IDC_KEEPSYSTEM                  1210
 #define IDC_BUTADDLEFT                  1211
-#define IDC_EDIT1                       1212
 #define IDC_SCRIPT_NAME                 1212
 #define IDC_EDIT_POLLING                1212
 #define IDC_FC_ID                       1213
+#define IDC_EDIT_ACTION                 1213
 #define IDC_SLIDER_TCC                  1214
-#define IDC_SLIDER_TCC2                 1215
 #define IDC_SLIDER_XMP                  1215
-#define IDC_CHECK1                      1215
 #define IDC_OCENABLE                    1215
+#define IDC_DISKSENSORS                 1216
+#define IDC_LIGHTACTION                 1217
+#define IDC_EDIT_TCC                    1218
+#define IDC_ACCENT                      1219
+#define IDC_COMBO_FREQ                  1220
+#define IDC_COMBO1                      1221
 #define IDC_BUTREMRGH                   1228
 #define IDC_BUTREMBOT                   1229
 #define IDC_BUTADDTOP                   1230
@@ -253,7 +249,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        167
 #define _APS_NEXT_COMMAND_VALUE         32814
-#define _APS_NEXT_CONTROL_VALUE         1216
+#define _APS_NEXT_CONTROL_VALUE         1222
 #define _APS_NEXT_SYMED_VALUE           113
 #endif
 #endif

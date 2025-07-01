@@ -1,12 +1,12 @@
 #include "GridHelper.h"
 #include "EventHandler.h"
 #include "FXHelper.h"
+#include "CaptureHelper.h"
 
 extern EventHandler* eve;
 extern ConfigHandler* conf;
 extern FXHelper* fxhl;
-
-extern AlienFX_SDK::Afx_action Code2Act(AlienFX_SDK::Afx_colorcode* c);
+extern ThreadHelper* dxgi_thread;
 
 void GridHelper::StartGridRun(groupset* grp, zonemap* cz, int x, int y) {
 	if (cz->lightMap.size() && (grp->effect.trigger == 4 || grp->effect.effectColors.size())) {
@@ -53,7 +53,7 @@ LRESULT CALLBACK GridKeyProc(int nCode, WPARAM wParam, LPARAM lParam) {
 	LRESULT res = CallNextHookEx(NULL, nCode, wParam, lParam);
 
 	if (wParam == WM_KEYDOWN && !(GetAsyncKeyState(((LPKBDLLHOOKSTRUCT)lParam)->vkCode) & 0xf000)) {
-		conf->modifyProfile.lock();
+		conf->modifyProfile.lockRead();
  		for (auto it = conf->activeProfile->lightsets.begin(); it != conf->activeProfile->lightsets.end(); it++)
 			if (it->effect.trigger == 2 && it->gridop.passive) { // keyboard effect
 				// Is it have a key pressed?
@@ -68,7 +68,7 @@ LRESULT CALLBACK GridKeyProc(int nCode, WPARAM wParam, LPARAM lParam) {
 							}
 					}
 			}
-		conf->modifyProfile.unlock();
+		conf->modifyProfile.unlockRead();
 	}
 
 	return res;
@@ -95,7 +95,7 @@ void GridHelper::StartCommonRun(groupset* ce) {
 
 void GridTriggerWatch(LPVOID param) {
 	GridHelper* src = (GridHelper*)param;
-	conf->modifyProfile.lock();
+	conf->modifyProfile.lockRead();
 	for (auto ce = conf->activeProfile->lightsets.begin(); ce != conf->activeProfile->lightsets.end(); ce++) {
 		if (ce->effect.trigger && ce->gridop.passive) {
 			switch (ce->effect.trigger) {
@@ -112,9 +112,8 @@ void GridTriggerWatch(LPVOID param) {
 				break;
 			}
 		}
-
 	}
-	conf->modifyProfile.unlock();
+	conf->modifyProfile.unlockRead();
 }
 
 GridHelper::GridHelper() {
@@ -135,18 +134,23 @@ void GridHelper::Stop() {
 			UnhookWindowsHookEx(kEvent);
 			kEvent = NULL;
 		}
-		if (capt) {
-			delete (CaptureHelper*)capt; capt = NULL;
-		}
+		//if (capt) {
+		//	delete (CaptureHelper*)capt; capt = NULL;
+		//}
 		if (sysmon) {
 			delete sysmon; sysmon = NULL;
+		}
+		for (auto ce = conf->activeProfile->lightsets.begin(); ce < conf->activeProfile->lightsets.end(); ce++) {
+			if (ce->effect.trigger == 4 && ce->effect.capt) {
+				delete (CaptureHelper*)ce->effect.capt;
+			}
 		}
 	}
 }
 
 void GridHelper::RestartWatch() {
 	Stop();
-	conf->modifyProfile.lock();
+	conf->modifyProfile.lockWrite();
 	for (auto ce = conf->activeProfile->lightsets.begin(); ce < conf->activeProfile->lightsets.end(); ce++) {
 		if (ce->effect.trigger) {
 			// Reset zone
@@ -159,15 +163,22 @@ void GridHelper::RestartWatch() {
 			case 3: if (!sysmon)
 				sysmon = new SysMonHelper();
 				break;
-			case 4: if (!capt) {
-				capt = new CaptureHelper(false);
+			case 4: {
 				auto zone = *conf->FindZoneMap(ce->group);
-				capt->SetLightGridSize(zone.gMaxX, zone.gMaxY);
+				if (zone.gMinX != 255/* && zone.gMinY != 255*/) {
+					ce->effect.capt = new CaptureHelper();
+					if (dxgi_thread)
+						((CaptureHelper*)ce->effect.capt)->SetLightGridSize(zone.gMaxX, zone.gMaxY);
+					else {
+						delete (CaptureHelper*)ce->effect.capt;
+						ce->effect.capt = NULL;
+					}
+				}
 			} break;
 			}
 		}
 	}
-	conf->modifyProfile.unlock();
+	conf->modifyProfile.unlockWrite();
 
 	gridTrigger = new ThreadHelper(GridTriggerWatch, (LPVOID)this, conf->geTact);
 	gridThread = new ThreadHelper(GridUpdate, NULL, conf->geTact);

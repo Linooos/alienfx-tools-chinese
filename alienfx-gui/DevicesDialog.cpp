@@ -3,11 +3,11 @@
 #include "FXHelper.h"
 #include "common.h"
 
-extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
-extern void RedrawButton(HWND hDlg, AlienFX_SDK::Afx_colorcode*);
+extern bool SetColor(HWND hDlg, AlienFX_SDK::Afx_colorcode&);
+extern DWORD MakeRGB(AlienFX_SDK::Afx_colorcode c);
+extern void RedrawButton(HWND hDlg, DWORD);
 extern HWND CreateToolTip(HWND hwndParent, HWND oldTip);
 extern void SetSlider(HWND tt, int value);
-extern void RemoveLightAndClean();
 extern void SetMainTabs();
 
 extern BOOL CALLBACK TabGrid(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
@@ -41,7 +41,37 @@ int eLid = 0;
 vector<gearInfo> csv_devs;
 WNDPROC oldproc;
 
-extern AlienFX_SDK::Afx_device* activeDevice;
+// last device selected
+AlienFX_SDK::Afx_device* activeDevice = NULL;
+
+void ResetPower()
+{
+	if (activeDevice->dev && activeDevice->version < AlienFX_SDK::API_V5) {
+		ShowNotification(&conf->niData, "警告!!!", "重新分配电源按钮, 请稍侯...");
+		vector<AlienFX_SDK::Afx_lightblock> act{ { (byte)(keySetLight->flags & ALIENFX_FLAG_POWER ?
+			 keySetLight->lightid : 127), {{AlienFX_SDK::AlienFX_A_Power, 3, 0x64}, {AlienFX_SDK::AlienFX_A_Power, 3, 0x64}} } };
+		activeDevice->dev->SetPowerAction(&act);
+		ShowNotification(&conf->niData, "警告!!!", "你将重置灯光硬件!");
+	}
+}
+
+void RemoveLightAndClean() {
+	// delete from all groups...
+	for (auto iter = conf->afx_dev.GetGroups()->begin(); iter < conf->afx_dev.GetGroups()->end(); iter++) {
+		for (auto lgh = iter->lights.begin(); lgh != iter->lights.end();)
+			if (lgh->did == activeDevice->pid && !conf->afx_dev.GetMappingByDev(activeDevice, lgh->lid)) {
+				// Clean from grids...
+				for (auto g = conf->afx_dev.GetGrids()->begin(); g < conf->afx_dev.GetGrids()->end(); g++) {
+					for (int ind = 0; ind < g->x * g->y; ind++)
+						if (g->grid[ind].lgh == lgh->lgh)
+							g->grid[ind].lgh = 0;
+				}
+				lgh = iter->lights.erase(lgh);
+			}
+			else
+				lgh++;
+	}
+}
 
 BOOL CALLBACK WhiteBalanceDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 
@@ -131,7 +161,7 @@ void UpdateDeviceInfo() {
 	char descript[128];
 	sprintf_s(descript, 128, "VID_%04X/PID_%04X, %d lights, %s",
 		activeDevice->vid, activeDevice->pid, (int)activeDevice->lights.size(),
-		activeDevice->dev ? ("APIv" + to_string(activeDevice->version)).c_str() : "(inactive)");
+		activeDevice->dev ? ("APIv" + to_string(activeDevice->version)).c_str() : "<未使用>");
 	SetWindowText(GetDlgItem(dDlg, IDC_INFO_VID), descript);
 	EnableWindow(GetDlgItem(dDlg, IDC_ISPOWERBUTTON), activeDevice->version && activeDevice->version < 5); // v5 and higher doesn't support power button
 	UpdateLightsList();
@@ -260,7 +290,7 @@ void ApplyDeviceMaps(HWND gridTab, bool force = false) {
 	for (auto i = csv_devs.begin(); i < csv_devs.end(); i++) {
 		if (force || i->selected) {
 			for (auto td = i->devs.begin(); td < i->devs.end(); td++) {
-				AlienFX_SDK::Afx_device* cDev = conf->afx_dev.AddDeviceById(td->pid, td->vid);
+				AlienFX_SDK::Afx_device* cDev = conf->afx_dev.AddDeviceById(td->devID);
 				cDev->name = td->name;
 				if (cDev->dev)
 					conf->afx_dev.activeLights += (int)td->lights.size() - (int)cDev->lights.size();
@@ -402,10 +432,9 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			}
 			break;
 		case IDC_BUT_DEVCLEAR:
-			if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "Do you want to clear all device information?", "Warning",
-				MB_YESNO | MB_ICONWARNING) == IDYES) {
+			if (WarningBox(hDlg, "Do you want to clear all device information?")) {
 				// remove all lights
-				auto ls = (int)activeDevice->lights.size();
+				int ls = (int)activeDevice->lights.size();
 				activeDevice->lights.clear();
 				RemoveLightAndClean();
 				// remove device if not active
@@ -417,7 +446,6 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 								// switch tab
 								tabSel = TAB_SETTINGS;
 								SetMainTabs();
-								break;
 							}
 							else {
 								activeDevice = &conf->afx_dev.fxdevs.front();
@@ -435,10 +463,10 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			break;
 		case IDC_BUT_CLEAR:
 			if (keySetLight) {
-				if (GetKeyState(VK_SHIFT) & 0xf0 || MessageBox(hDlg, "确定重置灯光？", "警告!!!",
-					MB_YESNO | MB_ICONWARNING) == IDYES) {
+				if (WarningBox(hDlg, "确定重置灯光？")) {
 					if (keySetLight->flags & ALIENFX_FLAG_POWER) {
-						fxhl->ResetPower(activeDevice);
+						keySetLight->flags = 0;
+						ResetPower();
 					}
 					// delete from mappings...
 					conf->afx_dev.RemoveMapping(activeDevice, eLid);
@@ -451,7 +479,7 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			}
 			break;
 		case IDC_BUTTON_TESTCOLOR: {
-			SetColor(GetDlgItem(hDlg, IDC_BUTTON_TESTCOLOR), &conf->testColor);
+			SetColor(GetDlgItem(hDlg, IDC_BUTTON_TESTCOLOR), conf->testColor);
 			fxhl->TestLight(activeDevice, -1);
 			fxhl->TestLight(activeDevice, eLid);
 			RedrawGridButtonZone();
@@ -459,11 +487,8 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		case IDC_ISPOWERBUTTON: {
 			if (keySetLight) {
 				SetBitMask(keySetLight->flags, ALIENFX_FLAG_POWER, IsDlgButtonChecked(hDlg, LOWORD(wParam)) == BST_CHECKED);
-				if (!(keySetLight->flags & ALIENFX_FLAG_POWER)) {
-					// remove power button config from chip config
-					fxhl->ResetPower(activeDevice);
-				}
-				//RemoveLightAndClean(activeDevice->pid, eLid);
+				// reassign power button at chip config
+				ResetPower();
 			}
 		} break;
 		case IDC_CHECK_INDICATOR:
@@ -642,7 +667,7 @@ BOOL CALLBACK TabDevicesDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		} break;
 	} break;
 	case WM_DRAWITEM:
-		RedrawButton(((DRAWITEMSTRUCT*)lParam)->hwndItem, &conf->testColor);
+		RedrawButton(((DRAWITEMSTRUCT*)lParam)->hwndItem, MakeRGB(conf->testColor));
 		break;
 	case WM_DESTROY:
 	{

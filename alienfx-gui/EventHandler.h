@@ -5,9 +5,10 @@ class EventHandler
 {
 private:
 	HWINEVENTHOOK hEvent = NULL, cEvent;
-	HHOOK kEvent;
-	DWORD maxProcess = 256;
-	DWORD* aProcesses;
+	HHOOK kEvent, ackEvent = NULL, acmEvent;
+	DWORD maxProcess = 1024;
+	DWORD* aProcesses = NULL;
+	DWORD currentFreq = 0;
 
 public:
 	void* capt = NULL;
@@ -17,7 +18,11 @@ public:
 
 	bool keyboardSwitchActive = false;
 
+	HANDLE wasAction, acThread, acStop;
+
+	// Power and display
 	void ChangePowerState();
+	void SetDisplayFreq(int freq);
 
 	// Profiles
 	void SwitchActiveProfile(profile* newID, bool force = false);
@@ -29,7 +34,10 @@ public:
 
 	// Effects
 	void ChangeEffectMode(bool profile = false);
-	void ChangeEffects(bool stop=false);
+	void ChangeEffects(bool stop = false);
+
+	// Timeout Action
+	void ChangeAction(bool run = true);
 
 	EventHandler();
 	~EventHandler();
