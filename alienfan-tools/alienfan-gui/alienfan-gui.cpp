@@ -146,27 +146,22 @@ void ToggleValue(DWORD& value, int cID) {
 }
 
 void SetOCUI(HWND hDlg) {
-    HWND tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC),
-        xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP),
-        tcc_edit = GetDlgItem(hDlg, IDC_EDIT_TCC);
-    // OC block
+    HWND tcc_slider = GetDlgItem(hDlg, IDC_SLIDER_TCC), xmp_slider = GetDlgItem(hDlg, IDC_SLIDER_XMP);
     EnableWindow(tcc_slider, fan_conf->ocEnable && mon->acpi->isTcc);
-    EnableWindow(tcc_edit, fan_conf->ocEnable && mon->acpi->isTcc);
-    if (fan_conf->ocEnable && mon->acpi->isTcc) {
-        SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
-        sTip1 = CreateToolTip(tcc_slider, sTip1);
-        SetSlider(sTip1, fan_conf->lastProf->currentTCC);
-        SendMessage(tcc_slider, TBM_SETPOS, true, fan_conf->lastProf->currentTCC);
-
-        // Set edit box value to match slider
-        SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
-    }
+    EnableWindow(GetDlgItem(hDlg, IDC_EDIT_TCC), fan_conf->ocEnable && mon->acpi->isTcc);
     EnableWindow(xmp_slider, fan_conf->ocEnable && mon->acpi->isXMP);
-    if (fan_conf->ocEnable && mon->acpi->isXMP) {
-        SendMessage(xmp_slider, TBM_SETRANGE, true, MAKELPARAM(0, 2));
-        sTip2 = CreateToolTip(xmp_slider, sTip2);
-        SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-        SendMessage(xmp_slider, TBM_SETPOS, true, fan_conf->lastProf->memoryXMP);
+
+    if (fan_conf->ocEnable) {
+        if (mon->acpi->isTcc) {
+            SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
+            CreateToolTip(tcc_slider, sTip1, fan_conf->lastProf->currentTCC);
+            // Set edit box value to match slider
+            SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+        }
+        if (mon->acpi->isXMP) {
+            SendMessage(xmp_slider, TBM_SETRANGE, true, MAKELPARAM(0, 2));
+            CreateToolTip(xmp_slider, sTip2, fan_conf->lastProf->memoryXMP);
+        }
     }
 }
 
@@ -227,7 +222,7 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         SetDlgItemInt(hDlg, IDC_EDIT_POLLING, fan_conf->pollingRate, false);
 
         // Set SystemID
-        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string(mon->systemID)).c_str());
+        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string(mon->acpi->systemID)).c_str());
 
         // OC block
         SetOCUI(hDlg);
@@ -362,8 +357,8 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
                 // Did it in range?
                 if (val && val == max(min(val, mon->acpi->maxTCC), mon->acpi->maxTCC - mon->acpi->maxOffset)) {
                     // Set slider and value
-                    SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
-                    SetSlider(sTip1, val);
+                    //SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
+                    SetSlider(sTip1, fan_conf->lastProf->currentTCC = val);
                     mon->SetOC();
                 }
             } break;
@@ -404,16 +399,14 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
             tMenu = GetSubMenu(tMenu, 0);
             MENUINFO mi{ sizeof(MENUINFO), MIM_STYLE, MNS_NOTIFYBYPOS /*| MNS_AUTODISMISS*/ };
             SetMenuInfo(tMenu, &mi);
-            MENUITEMINFO mInfo{ sizeof(MENUITEMINFO), MIIM_STRING | MIIM_ID | MIIM_STATE };
             HMENU pMenu;
             pMenu = CreatePopupMenu();
-            mInfo.wID = ID_TRAYMENU_POWER_SELECTED;
             for (int i = 0; i < mon->powerSize; i++) {
-                mInfo.dwTypeData = (LPSTR)fan_conf->powers[mon->acpi->powers[i]].c_str();
-                mInfo.fState = (i == fan_conf->lastProf->powerStage) ? MF_CHECKED : MF_UNCHECKED;
-                InsertMenuItem(pMenu, i, false, &mInfo);
+                AppendMenu(pMenu, MF_STRING | (i == fan_conf->lastProf->powerStage ? MF_CHECKED : MF_UNCHECKED),
+                    i, (LPSTR)fan_conf->powers[mon->acpi->powers[i]].c_str());
             }
-            ModifyMenu(tMenu, ID_MENU_POWER, MF_BYCOMMAND | MF_STRING | MF_POPUP, (UINT_PTR)pMenu, ("性能模式 -> " +
+
+            ModifyMenu(tMenu, ID_MENU_POWER, MF_BYCOMMAND | MF_STRING | MF_POPUP, (UINT_PTR)pMenu, ("电源模式 - " +
                 fan_conf->powers[mon->acpi->powers[fan_conf->lastProf->powerStage]]).c_str());
             EnableMenuItem(tMenu, ID_MENU_GMODE, mon->acpi->isGmode ? MF_ENABLED : MF_DISABLED);
             CheckMenuItem(tMenu, ID_MENU_GMODE, fan_conf->lastProf->gmodeStage ? MF_CHECKED : MF_UNCHECKED);
@@ -470,8 +463,8 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         }
         break;
     case WM_MENUCOMMAND: {
-        int idx = LOWORD(wParam);
-        switch (GetMenuItemID((HMENU)lParam, idx)) {
+        int idx = GetMenuItemID((HMENU)lParam, LOWORD(wParam));
+        switch (idx) {
         case ID_MENU_EXIT:
             DestroyWindow(hDlg);
             break;
@@ -481,10 +474,9 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         case ID_MENU_GMODE:
             AlterGMode(power_list);
             break;
-        case ID_TRAYMENU_POWER_SELECTED:
+        default:
             mon->SetPowerMode(idx);
             ComboBox_SetCurSel(power_list, mon->powerMode);
-            break;
         }
     } break;
     case WM_NOTIFY:
@@ -504,13 +496,12 @@ LRESULT CALLBACK FanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
                 SetSlider(sTip1, fan_conf->lastProf->currentTCC);
                 // Update edit box
                 SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
-                mon->SetOC();
             }
             if ((HWND)lParam == xmp_slider) {
                 fan_conf->lastProf->memoryXMP = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-                mon->SetOC();
             }
+            mon->SetOC();
         } break;
         } break;
     case WM_CLOSE:

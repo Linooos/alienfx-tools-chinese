@@ -19,7 +19,6 @@ MonHelper::MonHelper() {
 		fansize = (WORD)acpi->fans.size();
 		powerSize = (WORD)acpi->powers.size();
 		sensorSize = (WORD)acpi->sensors.size();
-		systemID = acpi->GetSystemID();
 		Start();
 	}
 }
@@ -48,13 +47,16 @@ void MonHelper::ResetBoost() {
 }
 
 void MonHelper::Start() {
+	// Set profile and initial modes
+	active = fan_conf->lastProf;
+	SetOC();
 	// start thread...
 	if (!monThread) {
 		oldPower = GetPowerMode();
-		active = NULL;
 		monThread = new ThreadHelper(CMonProc, this, fan_conf->pollingRate, THREAD_PRIORITY_NORMAL/*THREAD_PRIORITY_BELOW_NORMAL*/);
 		DebugPrint("Mon thread start.\n");
 	}
+	SetCurrentMode();
 }
 
 void MonHelper::Stop() {
@@ -70,7 +72,7 @@ void MonHelper::Stop() {
 
 void MonHelper::SetCurrentMode(int newMode) {
 	if (newMode < 0) {
-		DebugPrint("Mon: Switching from profile\n");
+		//DebugPrint("Mon: Switching from profile\n");
 		newMode = fan_conf->lastProf->gmodeStage ? powerSize :
 			fan_conf->acPower ? fan_conf->lastProf->powerStage : fan_conf->lastProf->powerStageDC;
 	}
@@ -82,18 +84,18 @@ void MonHelper::SetCurrentMode(int newMode) {
 			}
 			ResetBoost();
 			acpi->SetPower(acpi->powers[newMode]);
-			DebugPrint("Mon: Power mode switch from " + (powerMode == powerSize ? "G-mode" : to_string(powerMode)) + " to " + to_string(newMode) + "\n");
+			//DebugPrint("Mon: Power mode switch from " + (powerMode == powerSize ? "G-mode" : to_string(powerMode)) + " to " + to_string(newMode) + "\n");
 		}
 		else {
 			acpi->SetGMode(1);
-			DebugPrint("Mon: Power mode switch from " + to_string(powerMode) + " to G-mode\n");
+			//DebugPrint("Mon: Power mode switch from " + to_string(powerMode) + " to G-mode\n");
 		}
 		powerMode = newMode;
 	}
 #ifdef _DEBUG
-	else {
-		DebugPrint("Mon: Same power mode\n");
-	}
+	//else {
+	//	DebugPrint("Mon: Same power mode\n");
+	//}
 #endif
 }
 
@@ -103,7 +105,6 @@ byte MonHelper::GetFanPercent(byte fanID)
 	WORD rpm = fanRpm[fanID];
 	if (!bst->maxRPM) // no MaxRPM yet
 		*bst = { 100, (WORD)max(acpi->GetMaxRPM(fanID), 1000) };
-		//bst->maxRPM = max(acpi->GetMaxRPM(fanID), 3000);
 	if (bst->maxRPM < rpm) // current RPM higher, then BIOS high
 		bst->maxRPM = rpm;
 	return (rpm * 100) / bst->maxRPM;
@@ -112,7 +113,7 @@ byte MonHelper::GetFanPercent(byte fanID)
 int MonHelper::GetPowerMode() {
 #ifdef _DEBUG
 	int res = acpi->GetGMode() ? powerSize : acpi->GetPower();
-	DebugPrint("Mon: BIOS mode " + to_string(res) + ", current " + to_string(powerMode) + "\n");
+	//DebugPrint("Mon: BIOS mode " + to_string(res) + ", current " + to_string(powerMode) + "\n");
 	return res;
 #else
 	return acpi->GetGMode() ? powerSize : acpi->GetPower();
@@ -130,11 +131,11 @@ void MonHelper::SetPowerMode(byte newMode) {
 }
 
 void CMonProc(LPVOID param) {
-	MonHelper* src = (MonHelper*) param;
+	MonHelper* src = (MonHelper*)param;
 	AlienFan_SDK::Control* acpi = src->acpi;
 	src->modified = false;
 
-	DebugPrint("Mon: Poll started\n");
+	//DebugPrint("Mon: Poll started\n");
 	// update values:
 	// temps..
 	for (int i = 0; i < src->sensorSize; i++) {
@@ -151,14 +152,9 @@ void CMonProc(LPVOID param) {
 		src->fanRpm[i] = acpi->GetFanRPM(i);
 	}
 
-	if (active != fan_conf->lastProf) {
-		active = fan_conf->lastProf; // profile changed
-		src->SetOC();
-	}
-
 #ifdef _DEBUG
 	if (!active)
-		DebugPrint("Zero fan profile!");
+		DebugPrint("Mon: Zero fan profile!");
 #endif
 
 	if (src->inControl && active) {
@@ -167,13 +163,13 @@ void CMonProc(LPVOID param) {
 		src->SetCurrentMode();
 
 		if (!src->powerMode && src->modified) {
-			DebugPrint("Mon: Boost calc started\n");
+			//DebugPrint("Mon: Boost calc started\n");
 			int cBoost;
-			for (auto cIter = active->fanControls.begin(); cIter != active->fanControls.end(); cIter++) {
+			for (auto& cIter : active->fanControls) {
 				// Check boost
-				byte i = cIter->first;
-				int curBoost = 0;
-				for (auto fIter = cIter->second.begin(); fIter != cIter->second.end(); fIter++) {
+				byte fanID = cIter.first;
+				int curBoost = 0;// , boostOld = src->senBoosts[fanID][src->lastBoost[fanID]];
+				for (auto fIter = cIter.second.begin(); fIter != cIter.second.end(); fIter++) {
 					if (fIter->second.active) {
 						sen_block* cur = &fIter->second;
 						WORD senID = fIter->first;
@@ -184,36 +180,36 @@ void CMonProc(LPVOID param) {
 							/ (k->temp - (k - 1)->temp);
 						else
 							cBoost = cur->points.back().boost;
-						src->senBoosts[i][senID] = cBoost;
+						src->senBoosts[fanID][senID] = cBoost;
 						if (cBoost > curBoost) {
 							curBoost = cBoost;
-							src->lastBoost[i] = senID;
+							src->lastBoost[fanID] = senID;
 						}
 					}
 				}
 				// Set boost
-				int curBoostRaw = (int)round((fan_conf->GetFanScale(i) * curBoost) / 100.0);
-				if (curBoostRaw < 101 || !src->fanSleep[i]) {
-					byte boostOld = src->acpi->GetFanBoost(i);
+				int curBoostRaw = (int)round((fan_conf->GetFanScale(fanID) * curBoost) / 100.0);
+				if (curBoostRaw < 101 || !src->fanSleep[fanID]) {
+					byte boostOld = src->acpi->GetFanBoost(fanID);
 					// Check overboost tricks...
 					if (boostOld < 90 && curBoostRaw > 100) {
 						curBoostRaw = 100;
-						src->fanSleep[i] = ((100 - boostOld) >> 3) + 2;
-						DebugPrint("Overboost started, fan " + to_string(i) + " locked for " + to_string(src->fanSleep[i]) + " tacts (old "
+						src->fanSleep[fanID] = ((100 - boostOld) >> 3) + 2;
+						DebugPrint("Overboost started, fan " + to_string(fanID) + " locked for " + to_string(src->fanSleep[fanID]) + " tacts (old "
 							+ to_string(boostOld) + ", new " + to_string(curBoostRaw) + ")!\n");
 					}
 					else
-						src->fanSleep[i] = 0;
+						src->fanSleep[fanID] = 0;
 					if (curBoostRaw != boostOld) {
-						int res = acpi->SetFanBoost(i, curBoostRaw);
-						//DebugPrint("Boost for fan#" + to_string(i) + " changed from " + to_string(boostOld)
+						int res = acpi->SetFanBoost(fanID, curBoostRaw);
+						//DebugPrint("Boost for fan#" + to_string(fanID) + " changed from " + to_string(boostOld)
 						//	+ " to " + to_string(curBoostRaw) + ", result " + to_string(res) + "\n");
 					}
 				}
 				else
-					--src->fanSleep[i];
+					--src->fanSleep[fanID];
 			}
 		}
 	}
-	DebugPrint("Mon: poll ended\n");
+	//DebugPrint("Mon: poll ended\n");
 }

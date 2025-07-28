@@ -93,8 +93,8 @@ void UpdateEffectInfo(HWND hDlg) {
 		CheckDlgButton(hDlg, IDC_CHECK_RPOS, mmap->effect.flags & GE_FLAG_RPOS);
 		ComboBox_SetCurSel(GetDlgItem(hDlg, IDC_COMBO_TRIGGER), mmap->effect.trigger);
 		ComboBox_SetCurSel(GetDlgItem(hDlg, IDC_COMBO_GEFFTYPE), mmap->effect.type);
-		SendMessage(GetDlgItem(hDlg, IDC_SLIDER_SPEED), TBM_SETPOS, true, mmap->effect.speed - 80);
-		SendMessage(GetDlgItem(hDlg, IDC_SLIDER_WIDTH), TBM_SETPOS, true, mmap->effect.width);
+		//SendMessage(GetDlgItem(hDlg, IDC_SLIDER_SPEED), TBM_SETPOS, true, mmap->effect.speed - 80);
+		//SendMessage(GetDlgItem(hDlg, IDC_SLIDER_WIDTH), TBM_SETPOS, true, mmap->effect.width);
 		SetSlider(sTip2, mmap->effect.speed - 80);
 		SetSlider(sTip3, mmap->effect.width);
 	}
@@ -119,11 +119,11 @@ BOOL CALLBACK TabGridDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 		SendMessage(width_slider, TBM_SETRANGE, true, MAKELPARAM(1, 80));
 		SendMessage(gs_slider, TBM_SETRANGE, true, MAKELPARAM(5, 1000));
 		SendMessage(gs_slider, TBM_SETTICFREQ, 50, 0);
-		SendMessage(gs_slider, TBM_SETPOS, true, conf->geTact);
-		sTip1 = CreateToolTip(gs_slider, sTip1);
-		SetSlider(sTip1, conf->geTact);
-		sTip2 = CreateToolTip(speed_slider, sTip2);
-		sTip3 = CreateToolTip(width_slider, sTip3);
+		//SendMessage(gs_slider, TBM_SETPOS, true, conf->geTact);
+		CreateToolTip(gs_slider, sTip1, conf->geTact);
+		//SetSlider(sTip1, conf->geTact);
+		CreateToolTip(speed_slider, sTip2);
+		CreateToolTip(width_slider, sTip3);
 		UpdateEffectInfo(hDlg);
 
 	} break;

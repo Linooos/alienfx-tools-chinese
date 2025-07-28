@@ -146,7 +146,7 @@ setbrightness=<brightness>\tSet lights brightness\n");
 
 int main(int argc, char* argv[])
 {
-    printf("AlienFan-CLI v9.3.0.1\n");
+    printf("AlienFan-CLI v9.3.0.2\n");
 #ifndef NOLIGHTS
     AlienFan_SDK::Lights* lights = NULL;
 #endif
@@ -155,7 +155,7 @@ int main(int argc, char* argv[])
         lights = new AlienFan_SDK::Lights(&acpi);
 #endif
         printf("Supported hardware (%d) detected, %d fans, %d sensors, %d power states%s%s%s%s.\n",
-            acpi.GetSystemID(), (int)acpi.fans.size(), (int)acpi.sensors.size(), (int)acpi.powers.size(),
+            acpi.systemID, (int)acpi.fans.size(), (int)acpi.sensors.size(), (int)acpi.powers.size(),
             (acpi.isGmode ? ", G-Mode" : ""),
             (acpi.isTcc ? ", TCC" : ""),
             (acpi.isXMP ? ", XMP" : ""),

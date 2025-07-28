@@ -40,7 +40,6 @@ namespace AlienFan_SDK {
 
 	class Control {
 	private:
-		DWORD systemID;
 		byte sysType;
 		void EnumSensors(IWbemServices* srv, const wchar_t* sname, byte type);
 	public:
@@ -53,7 +52,7 @@ namespace AlienFan_SDK {
 			isXMP = false,
 			isGmode = false;
 		byte maxTCC, maxOffset;
-
+		DWORD systemID;
 		Control();
 		~Control();
 
@@ -72,13 +71,13 @@ namespace AlienFan_SDK {
 		// Result: percent of the fan speed
 		int GetFanPercent(int fanID);
 
-		// Get boost value for the fan index fanID at fans[]. If force, raw value returned, otherwise cooked by boost
+		// Get boost value for the fan index fanID at fans[].
 		// Result: Error or raw value if forced, otherwise cooked by boost.
-		int GetFanBoost(int fanID/*, bool force = false*/);
+		int GetFanBoost(int fanID);
 
-		// Set boost value for the fan index fanID at fans[]. If force, raw value set, otherwise cooked by boost.
+		// Set boost value for the fan index fanID at fans[].
 		// Result: value or error
-		int SetFanBoost(int fanID, byte value/*, bool force = false*/);
+		int SetFanBoost(int fanID, byte value);
 
 		// Get temperature value for the sensor index TanID at sensors[]
 		// Result: temperature value or error
@@ -119,7 +118,7 @@ namespace AlienFan_SDK {
 		int SetXMP(byte memXMP);
 
 		// Return current device ID
-		inline DWORD GetSystemID() { return systemID; };
+		//inline DWORD GetSystemID() { return systemID; };
 
 		// Call custom Alienware method trough WMI
 		int CallWMIMethod(byte com, byte arg1 = 0, byte arg2 = 0);
@@ -132,29 +131,29 @@ namespace AlienFan_SDK {
 		IWbemClassObject* m_AWCCGetObj = NULL;
 	};
 
-	class Lights {
-	private:
-		const BSTR colorList[2]{
-			//(BSTR)L"SetLEDColor",			// 0x04
-			(BSTR)L"Set24BitsLEDColor",		// 0x12
-			(BSTR)L"LEDBrightness"			// 0x03
-		};
+	//class Lights {
+	//private:
+	//	const BSTR colorList[2]{
+	//		//(BSTR)L"SetLEDColor",			// 0x04
+	//		(BSTR)L"Set24BitsLEDColor",		// 0x12
+	//		(BSTR)L"LEDBrightness"			// 0x03
+	//	};
 
-		IWbemClassObject* m_InParamaters = NULL;
-		IWbemServices* m_WbemServices = NULL;
-		VARIANT m_instancePath;
-		int CallWMIMethod(byte com, byte* arg1);
-	public:
-		bool isActivated = false;
+	//	IWbemClassObject* m_InParamaters = NULL;
+	//	IWbemServices* m_WbemServices = NULL;
+	//	VARIANT m_instancePath;
+	//	int CallWMIMethod(byte com, byte* arg1);
+	//public:
+	//	bool isActivated = false;
 
-		Lights(Control *ac);
+	//	Lights(Control *ac);
 
-		// Set lights brightness, 0..F
-		bool SetBrightness(byte brightness);
+	//	// Set lights brightness, 0..F
+	//	bool SetBrightness(byte brightness);
 
-		// Set color of lights mask defined by id to RGB
-		bool SetColor(byte mask, byte r, byte g, byte b, bool save = false);
+	//	// Set color of lights mask defined by id to RGB
+	//	bool SetColor(byte mask, byte r, byte g, byte b, bool save = false);
 
-	};
+	//};
 
 }

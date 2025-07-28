@@ -1,9 +1,8 @@
 #include "alienfx-gui.h"
 #include "EventHandler.h"
 #include "CaptureHelper.h"
+#include "Common.h"
 
-extern HWND CreateToolTip(HWND hwndParent, HWND oldTip);
-extern void SetSlider(HWND tt, int value);
 extern void UpdateZoneList();
 extern void UpdateZoneAndGrid();
 extern void dxgi_Restart();
@@ -62,25 +61,25 @@ BOOL CALLBACK TabAmbientDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         CheckDlgButton(hDlg, conf->amb_calc ? IDC_RADIO_PREVEALING : IDC_RADIO_MEDIUM, BST_CHECKED);
 
         SendMessage(brSlider, TBM_SETRANGE, true, MAKELPARAM(0, 255));
-        SendMessage(brSlider, TBM_SETPOS, true, conf->amb_shift);
+        //SendMessage(brSlider, TBM_SETPOS, true, conf->amb_shift);
         SendMessage(brSlider, TBM_SETTICFREQ, 16, 0);
 
         SendMessage(gridX, TBM_SETRANGE, true, MAKELPARAM(1, 20));
-        SendMessage(gridX, TBM_SETPOS, true, conf->amb_grid.x);
+        //SendMessage(gridX, TBM_SETPOS, true, conf->amb_grid.x);
         //SendMessage(gridX, TBM_SETTICFREQ, 16, 0);
 
         SendMessage(gridY, TBM_SETRANGE, true, MAKELPARAM(1, 12));
-        SendMessage(gridY, TBM_SETPOS, true, conf->amb_grid.y);
+        //SendMessage(gridY, TBM_SETPOS, true, conf->amb_grid.y);
         //SendMessage(gridY, TBM_SETTICFREQ, 16, 0);
 
-        sTip1 = CreateToolTip(brSlider, sTip1);
-        SetSlider(sTip1, conf->amb_shift);
+        CreateToolTip(brSlider, sTip1, conf->amb_shift);
+        //SetSlider(sTip1, conf->amb_shift);
 
-        sTip2 = CreateToolTip(gridX, sTip2);
-        SetSlider(sTip2, conf->amb_grid.x);
+        CreateToolTip(gridX, sTip2, conf->amb_grid.x);
+        //SetSlider(sTip2, conf->amb_grid.x);
 
-        sTip3 = CreateToolTip(gridY, sTip3);
-        SetSlider(sTip3, conf->amb_grid.y);
+        CreateToolTip(gridY, sTip3, conf->amb_grid.y);
+        //SetSlider(sTip3, conf->amb_grid.y);
 
         // init grids...
         InitButtonZone(hDlg);

@@ -46,7 +46,6 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         PowerReadACValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &acMode);
         PowerReadDCValueIndex(NULL, sch_guid, &GUID_PROCESSOR_SETTINGS_SUBGROUP, &perfset, &dcMode);
 
-        //vector<string> pModes{ "关闭睿频", "启用睿频", "性能", "高效", "高效性能" };
         UpdateCombo(GetDlgItem(hDlg, IDC_AC_BOOST), pModes, acMode);
         UpdateCombo(GetDlgItem(hDlg, IDC_DC_BOOST), pModes, dcMode);;
 
@@ -59,31 +58,27 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
         tipWindow = GetDlgItem(hDlg, IDC_FC_LABEL);
 
         // Set SystemID
-        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string((unsigned int)mon->systemID)).c_str());
+        SetDlgItemText(hDlg, IDC_FC_ID, ("ID: " + to_string((unsigned int)mon->acpi->systemID)).c_str());
 
         // Start UI update thread...
         SetTimer(hDlg, 0, fan_conf->pollingRate, NULL);
 
         // OC block
-        EnableWindow(tcc_slider, fan_conf->ocEnable && mon->acpi->isTcc);
-        EnableWindow(tcc_edit, fan_conf->ocEnable && mon->acpi->isTcc);
-        if (fan_conf->ocEnable && mon->acpi->isTcc) {
-            SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
-            sTip1 = CreateToolTip(tcc_slider, sTip1);
-            SetSlider(sTip1, fan_conf->lastProf->currentTCC);
-            SendMessage(tcc_slider, TBM_SETPOS, true, fan_conf->lastProf->currentTCC);
-
-            // Set edit box value to match slider
-			SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+        if (fan_conf->ocEnable) {
+            if (mon->acpi->isTcc) {
+                EnableWindow(tcc_slider, true);
+                EnableWindow(tcc_edit, true);
+                SendMessage(tcc_slider, TBM_SETRANGE, true, MAKELPARAM(mon->acpi->maxTCC - mon->acpi->maxOffset, mon->acpi->maxTCC));
+                CreateToolTip(tcc_slider, sTip1, fan_conf->lastProf->currentTCC);
+                // Set edit box value to match slider
+                SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
+            }
+            if (mon->acpi->isXMP) {
+                EnableWindow(xmp_slider, true);
+                SendMessage(xmp_slider, TBM_SETRANGE, true, MAKELPARAM(0, 2));
+                CreateToolTip(xmp_slider, sTip2, fan_conf->lastProf->memoryXMP);
+            }
         }
-        EnableWindow(xmp_slider, fan_conf->ocEnable && mon->acpi->isXMP);
-        if (fan_conf->ocEnable && mon->acpi->isXMP) {
-            SendMessage(xmp_slider, TBM_SETRANGE, true, MAKELPARAM(0, 2));
-            sTip2 = CreateToolTip(xmp_slider, sTip2);
-            SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-            SendMessage(xmp_slider, TBM_SETPOS, true, fan_conf->lastProf->memoryXMP);
-        }
-
     } break;
     case WM_COMMAND:
     {
@@ -157,8 +152,8 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
                 // Did it in range?
                 if (val && val == max(min(val, mon->acpi->maxTCC), mon->acpi->maxTCC - mon->acpi->maxOffset)) {
                     // Set slider and value
-                    SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
-                    SetSlider(sTip1, val);
+                    //SendMessage(tcc_slider, TBM_SETPOS, TRUE, fan_conf->lastProf->currentTCC = val);
+                    SetSlider(sTip1, fan_conf->lastProf->currentTCC = val);
                     mon->SetOC();
                 }
             } break;
@@ -189,13 +184,12 @@ BOOL CALLBACK TabFanDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
                 SetSlider(sTip1, fan_conf->lastProf->currentTCC);
                 // Update edit box
 				SetDlgItemInt(hDlg, IDC_EDIT_TCC, fan_conf->lastProf->currentTCC, FALSE);
-                mon->SetOC();
             }
             if ((HWND)lParam == xmp_slider) {
                 fan_conf->lastProf->memoryXMP = (BYTE)SendMessage((HWND)lParam, TBM_GETPOS, 0, 0);
                 SetSlider(sTip2, fan_conf->lastProf->memoryXMP);
-                mon->SetOC();
             }
+            mon->SetOC();
         } break;
         } break;
     case WM_TIMER:

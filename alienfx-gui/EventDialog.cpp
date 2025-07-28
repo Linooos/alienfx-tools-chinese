@@ -31,7 +31,7 @@ void SetEventData(HWND hDlg) {
 		CheckDlgButton(hDlg, IDC_RADIO_PERF, ev->state == MON_TYPE_PERF ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_RADIO_IND, ev->state == MON_TYPE_IND ? BST_CHECKED : BST_UNCHECKED);
 		UpdateCombo(GetDlgItem(hDlg, IDC_EVENT_SOURCE), ev->state < 2 ? eventNamesP : eventNamesI, ev->source);
-		SendMessage(GetDlgItem(hDlg, IDC_CUTLEVEL), TBM_SETPOS, true, ev->cut);
+		//SendMessage(GetDlgItem(hDlg, IDC_CUTLEVEL), TBM_SETPOS, true, ev->cut);
 		SetSlider(sTip2, ev->cut);
 	}
 	else {
@@ -95,7 +95,7 @@ BOOL CALLBACK TabEventsDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 		// Set slider
 		SendMessage(s2_slider, TBM_SETRANGE, true, MAKELPARAM(0, 100));
 		SendMessage(s2_slider, TBM_SETTICFREQ, 10, 0);
-		sTip2 = CreateToolTip(s2_slider, sTip2);
+		CreateToolTip(s2_slider, sTip2);
 		// Start UI update thread...
 		SetTimer(hDlg, 0, 500, NULL);
 	} break;
