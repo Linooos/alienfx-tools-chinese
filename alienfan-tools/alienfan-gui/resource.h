@@ -20,6 +20,7 @@
 #define IDC_EDIT_POLLING                1018
 #define IDC_FC_ID                       1019
 #define IDC_SYSLINK_HOMEPAGE            1043
+#define IDC_SYSLINK_HOMEPAGE2           1044
 #define IDC_STATIC_VERSION              1048
 #define IDC_AC_BOOST                    1124
 #define IDC_DC_BOOST                    1125
